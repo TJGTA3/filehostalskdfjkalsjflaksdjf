@@ -1927,7 +1927,10 @@ class Runtime {
     malloc(size) {
         // @ts-ignore
         const _game = window.unityInstance || game;
-        return _game.Module.asm.malloc(size);
+        if (_game.Module.asm.malloc(size))
+          return _game.Module.asm.malloc(size);
+        if (_game.Module._malloc(size))
+           return _game.Module._malloc(size);
     }
     free(block) {
         // @ts-ignore
@@ -6625,4 +6628,5 @@ class WailParser extends BufferReader {
 /******/ 	window.UnityWebModkit = __webpack_exports__;
 /******/ 	
 /******/ })()
+
 ;
