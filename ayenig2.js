@@ -1927,10 +1927,18 @@ class Runtime {
     malloc(size) {
         // @ts-ignore
         const _game = window.unityInstance || game;
+      try {
         if (_game.Module.asm.malloc(size))
           return _game.Module.asm.malloc(size);
+      } catch (e) {
+        console.log("first fail", e);
+      }
+      try {
         if (_game.Module._malloc(size))
            return _game.Module._malloc(size);
+      } catch (e) {
+        console.log("second fail", e);
+      }
     }
     free(block) {
         // @ts-ignore
@@ -6630,3 +6638,4 @@ class WailParser extends BufferReader {
 /******/ })()
 
 ;
+
