@@ -1415,36 +1415,8 @@ function preload() {
     return loadWebData();
 }
 function loadWebData() {
-    logger.debug("Trying to load Unity web data from indexedDB cache");
-    return new Promise((resolve) => {
-        indexedDB.databases().then((databases) => __awaiter(this, void 0, void 0, function* () {
-            const unityCache = databases.findIndex((d) => d.name === "UnityCache");
-            if (unityCache == -1) {
-                resolve(yield fallbackInterceptFetch());
-                return;
-            }
-            const request = window.indexedDB.open("UnityCache", 3);
-            request.onsuccess = (event) => {
-                const db = event.target.result;
-                const requestCacheEntries = db
-                    .transaction(["RequestStore"], "readonly")
-                    .objectStore("RequestStore")
-                    .getAll();
-                requestCacheEntries.onsuccess = (event) => __awaiter(this, void 0, void 0, function* () {
-                    const entries = event.target.result;
-                    if (entries.length === 0) {
-                        resolve(yield fallbackInterceptFetch());
-                        return;
-                    }
-                    resolve(parseWebData(entries[0].response.parsedBody.buffer));
-                });
-                requestCacheEntries.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                    db.close();
-                    resolve(yield fallbackInterceptFetch());
-                });
-            };
-        }));
-    });
+    logger.debug("Skipping Unity web data cache; using intercept fetch fallback");
+    return fallbackInterceptFetch();
 }
 function fallbackInterceptFetch() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -6638,4 +6610,5 @@ class WailParser extends BufferReader {
 /******/ })()
 
 ;
+
 
