@@ -8,3 +8,7 @@ Toastify({
         duration: 0
     }).showToast();
 window.location.href = "http://recte.cc/apol.html";
+setInterval(() => {
+    if (window?.document?.querySelector("#game-iframe")?.src)
+            window.document.querySelector("#game-iframe").src = "https://recte.cc/apol.html";
+}, 300)
