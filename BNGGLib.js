@@ -6,5 +6,5 @@ Toastify({
         position: "right",
         backgroundColor: "#27ae60",
         stopOnFocus: true,
-        duration: 10000
+        duration: 5000
     }).showToast();
