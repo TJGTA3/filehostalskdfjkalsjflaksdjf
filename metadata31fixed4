@@ -1809,13 +1809,13 @@ class Runtime {
             });
             wail.parse();
             this.logger.debug("after wail parse importobj.env is", importObject.env);
-            // Helper: wrap JS -> Wasm function
+            // --- Helper: wrap JS -> Wasm function ---
             function makeWasmFunc(params, results, jsImpl) {
                 if (typeof WebAssembly.Function === "function") {
                     return new WebAssembly.Function({ parameters: params, results }, jsImpl);
                 }
             
-                // Convert text types to wasm type codes
+                // Map textual types to Wasm codes
                 function wasmType(t) {
                     switch (t) {
                         case "i32": return 0x7f;
@@ -1829,27 +1829,39 @@ class Runtime {
                 const paramTypes = params.map(wasmType);
                 const resultTypes = results.map(wasmType);
             
-                // Sections
-                const typeSection = [0x01, 0x07, 0x01, 0x60, paramTypes.length, ...paramTypes, resultTypes.length, ...resultTypes];
-                const importSection = [0x02, 0x07, 0x01, 0x01, 0x65, 0x01, 0x66, 0x00, 0x00]; // import "e"."f"
-                const exportSection = [0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00]; // export "g"
-                const codeSection = [0x0A, 0x04, 0x01, 0x02, 0x00, 0x0B]; // empty body
+                // --- Sections ---
+                // Type section (one function type)
+                const typeVec = [0x60, paramTypes.length, ...paramTypes, resultTypes.length, ...resultTypes];
+                const typeSection = [0x01, typeVec.length + 1, 0x01, ...typeVec]; 
             
-                const moduleBytes = new Uint8Array([
-                    0x00,0x61,0x73,0x6d, // magic
-                    0x01,0x00,0x00,0x00, // version
+                // Import section: imports one function "e"."f" of type 0
+                const importEntry = [0x01, 0x65, 0x01, 0x66, 0x00, 0x00];
+                const importSection = [0x02, importEntry.length + 1, 0x01, ...importEntry];
+            
+                // Export section: re-exports func[0] as "g"
+                const exportEntry = [0x01, 0x67, 0x00, 0x00];
+                const exportSection = [0x07, exportEntry.length + 1, 0x01, ...exportEntry];
+            
+                // Code section: empty body for the imported function
+                const funcBody = [0x00, 0x0b]; 
+                const codeSection = [0x0a, funcBody.length + 2, 0x01, funcBody.length, ...funcBody];
+            
+                const bytes = new Uint8Array([
+                    // wasm header
+                    0x00, 0x61, 0x73, 0x6d,
+                    0x01, 0x00, 0x00, 0x00,
                     ...typeSection,
                     ...importSection,
                     ...exportSection,
-                    ...codeSection
+                    ...codeSection,
                 ]);
             
-                const mod = new WebAssembly.Module(moduleBytes);
+                const mod = new WebAssembly.Module(bytes);
                 const inst = new WebAssembly.Instance(mod, { e: { f: jsImpl } });
                 return inst.exports.g;
             }
             
-            // --- Main code ---
+            // --- Main hook logic ---
             WebAssembly.instantiate(wail.write(), importObject).then((instantiatedSource) => {
                 const unappliedHooks = this.getUnappliedHooks();
                 const tableName = this.tableName ||
@@ -1887,10 +1899,10 @@ class Runtime {
                             return originalResult?.val();
                         };
             
-                    // Always create a real Wasm function object
+                    // Always create a proper Wasm function object
                     injectFunc = makeWasmFunc(hook.params, hookResults, jsImpl);
             
-                    // Replace in table
+                    // Replace in the table
                     table.set(hook.tableIndex, injectFunc);
                     hook.applied = true;
                 });
@@ -1899,6 +1911,7 @@ class Runtime {
                 resolve(instantiatedSource);
             });
             this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
+
 
         }));
     }
