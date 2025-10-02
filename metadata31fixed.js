@@ -1810,64 +1810,63 @@ class Runtime {
             wail.parse();
             this.logger.debug("after wail parse importobj.env is", importObject.env);
             WebAssembly.instantiate(wail.write(), importObject).then((instantiatedSource) => {
-                // Fallback for hooking functions that are invoked indirectly
-                const unappliedHooks = this.getUnappliedHooks();
-                const tableName = this.tableName ||
-                    this.resolveTableName(instantiatedSource.instance.exports);
-            
-                unappliedHooks.forEach((hook) => {
-                    const table = instantiatedSource.instance.exports[tableName];
-                    var originalFunc = table.get(hook.tableIndex);
-                    const hookResults = hook.returnType ? [hook.returnType] : [];
-                    let injectFunc = null;
-            
-                    // Function body depending on hook.kind
-                    const jsImpl = !hook.kind
-                        ? (...args) => { // PREFIX
-                            if (!hook.enabled) {
-                                return hook.returnType ? originalFunc(...args) : originalFunc(...args);
-                            }
-                            const wrappedArgs = args.map(arg => new ValueWrapper(arg));
-                            const result = hook.callback(...wrappedArgs);
-                            args = wrappedArgs.map(arg => arg.val());
-                            if (result === undefined || result === true) {
-                                return hook.returnType ? originalFunc(...args) : originalFunc(...args);
-                            }
-                        }
-                        : (...args) => { // POSTFIX
-                            let originalResult = originalFunc(...args);
-                            if (!hook.enabled) {
-                                return hook.returnType ? originalResult : undefined;
-                            }
-                            if (originalResult !== undefined) {
-                                originalResult = new ValueWrapper(originalResult);
-                            }
-                            const wrappedArgs = args.map(arg => new ValueWrapper(arg));
-                            hook.callback(originalResult, ...wrappedArgs);
-                            return originalResult?.val();
-                        };
-            
-                    // --- Compatibility: WebAssembly.Function vs funcref fallback ---
-                    if (typeof WebAssembly.Function === "function") {
-                        injectFunc = new WebAssembly.Function({
-                            parameters: hook.params,
-                            results: hookResults,
-                        }, jsImpl);
-                    } else {
-                        const idx = table.length;
-                        table.grow(1);
-                        table.set(idx, jsImpl);
-                        injectFunc = table.get(idx);
-                    }
-            
-                    table.set(hook.tableIndex, injectFunc);
-                    hook.applied = true;
-                });
-            
-                this.logger.message("Chainloader startup complete");
-                resolve(instantiatedSource);
-            });
-            this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
+              // Fallback for hooking functions that are invoked indirectly
+              const unappliedHooks = this.getUnappliedHooks();
+              const tableName = this.tableName ||
+                  this.resolveTableName(instantiatedSource.instance.exports);
+          
+              unappliedHooks.forEach((hook) => {
+                  const table = instantiatedSource.instance.exports[tableName];
+                  var originalFunc = table.get(hook.tableIndex);
+                  const hookResults = hook.returnType ? [hook.returnType] : [];
+                  let injectFunc = null;
+          
+                  // JS implementation depending on hook.kind
+                  const jsImpl = !hook.kind
+                      ? (...args) => { // PREFIX
+                          if (!hook.enabled) {
+                              return hook.returnType ? originalFunc(...args) : originalFunc(...args);
+                          }
+                          const wrappedArgs = args.map(arg => new ValueWrapper(arg));
+                          const result = hook.callback(...wrappedArgs);
+                          args = wrappedArgs.map(arg => arg.val());
+                          if (result === undefined || result === true) {
+                              return hook.returnType ? originalFunc(...args) : originalFunc(...args);
+                          }
+                      }
+                      : (...args) => { // POSTFIX
+                          let originalResult = originalFunc(...args);
+                          if (!hook.enabled) {
+                              return hook.returnType ? originalResult : undefined;
+                          }
+                          if (originalResult !== undefined) {
+                              originalResult = new ValueWrapper(originalResult);
+                          }
+                          const wrappedArgs = args.map(arg => new ValueWrapper(arg));
+                          hook.callback(originalResult, ...wrappedArgs);
+                          return originalResult?.val();
+                      };
+          
+                  // --- Compatibility: WebAssembly.Function vs direct table injection ---
+                  if (typeof WebAssembly.Function === "function") {
+                      injectFunc = new WebAssembly.Function({
+                          parameters: hook.params,
+                          results: hookResults,
+                      }, jsImpl);
+                      table.set(hook.tableIndex, injectFunc);
+                  } else {
+                      // Directly overwrite the slot with the JS function
+                      table.set(hook.tableIndex, jsImpl);
+                      injectFunc = jsImpl;
+                  }
+          
+                  hook.applied = true;
+              });
+          
+              this.logger.message("Chainloader startup complete");
+              resolve(instantiatedSource);
+          });
+          this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
 
         }));
     }
