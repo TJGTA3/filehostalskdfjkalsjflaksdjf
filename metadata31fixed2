@@ -1809,64 +1809,96 @@ class Runtime {
             });
             wail.parse();
             this.logger.debug("after wail parse importobj.env is", importObject.env);
+            // Helper: wrap JS -> Wasm function
+            function makeWasmFunc(params, results, jsImpl) {
+                if (typeof WebAssembly.Function === "function") {
+                    return new WebAssembly.Function({ parameters: params, results }, jsImpl);
+                }
+            
+                // Convert text types to wasm type codes
+                function wasmType(t) {
+                    switch (t) {
+                        case "i32": return 0x7f;
+                        case "i64": return 0x7e;
+                        case "f32": return 0x7d;
+                        case "f64": return 0x7c;
+                        default: throw new Error("Unsupported type " + t);
+                    }
+                }
+            
+                const paramTypes = params.map(wasmType);
+                const resultTypes = results.map(wasmType);
+            
+                // Sections
+                const typeSection = [0x01, 0x07, 0x01, 0x60, paramTypes.length, ...paramTypes, resultTypes.length, ...resultTypes];
+                const importSection = [0x02, 0x07, 0x01, 0x01, 0x65, 0x01, 0x66, 0x00, 0x00]; // import "e"."f"
+                const exportSection = [0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00]; // export "g"
+                const codeSection = [0x0A, 0x04, 0x01, 0x02, 0x00, 0x0B]; // empty body
+            
+                const moduleBytes = new Uint8Array([
+                    0x00,0x61,0x73,0x6d, // magic
+                    0x01,0x00,0x00,0x00, // version
+                    ...typeSection,
+                    ...importSection,
+                    ...exportSection,
+                    ...codeSection
+                ]);
+            
+                const mod = new WebAssembly.Module(moduleBytes);
+                const inst = new WebAssembly.Instance(mod, { e: { f: jsImpl } });
+                return inst.exports.g;
+            }
+            
+            // --- Main code ---
             WebAssembly.instantiate(wail.write(), importObject).then((instantiatedSource) => {
-              // Fallback for hooking functions that are invoked indirectly
-              const unappliedHooks = this.getUnappliedHooks();
-              const tableName = this.tableName ||
-                  this.resolveTableName(instantiatedSource.instance.exports);
-          
-              unappliedHooks.forEach((hook) => {
-                  const table = instantiatedSource.instance.exports[tableName];
-                  var originalFunc = table.get(hook.tableIndex);
-                  const hookResults = hook.returnType ? [hook.returnType] : [];
-                  let injectFunc = null;
-          
-                  // JS implementation depending on hook.kind
-                  const jsImpl = !hook.kind
-                      ? (...args) => { // PREFIX
-                          if (!hook.enabled) {
-                              return hook.returnType ? originalFunc(...args) : originalFunc(...args);
-                          }
-                          const wrappedArgs = args.map(arg => new ValueWrapper(arg));
-                          const result = hook.callback(...wrappedArgs);
-                          args = wrappedArgs.map(arg => arg.val());
-                          if (result === undefined || result === true) {
-                              return hook.returnType ? originalFunc(...args) : originalFunc(...args);
-                          }
-                      }
-                      : (...args) => { // POSTFIX
-                          let originalResult = originalFunc(...args);
-                          if (!hook.enabled) {
-                              return hook.returnType ? originalResult : undefined;
-                          }
-                          if (originalResult !== undefined) {
-                              originalResult = new ValueWrapper(originalResult);
-                          }
-                          const wrappedArgs = args.map(arg => new ValueWrapper(arg));
-                          hook.callback(originalResult, ...wrappedArgs);
-                          return originalResult?.val();
-                      };
-          
-                  // --- Compatibility: WebAssembly.Function vs direct table injection ---
-                  if (typeof WebAssembly.Function === "function") {
-                      injectFunc = new WebAssembly.Function({
-                          parameters: hook.params,
-                          results: hookResults,
-                      }, jsImpl);
-                      table.set(hook.tableIndex, injectFunc);
-                  } else {
-                      // Directly overwrite the slot with the JS function
-                      table.set(hook.tableIndex, jsImpl);
-                      injectFunc = jsImpl;
-                  }
-          
-                  hook.applied = true;
-              });
-          
-              this.logger.message("Chainloader startup complete");
-              resolve(instantiatedSource);
-          });
-          this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
+                const unappliedHooks = this.getUnappliedHooks();
+                const tableName = this.tableName ||
+                    this.resolveTableName(instantiatedSource.instance.exports);
+            
+                unappliedHooks.forEach((hook) => {
+                    const table = instantiatedSource.instance.exports[tableName];
+                    const originalFunc = table.get(hook.tableIndex);
+                    const hookResults = hook.returnType ? [hook.returnType] : [];
+                    let injectFunc = null;
+            
+                    // JS implementation for prefix or postfix
+                    const jsImpl = !hook.kind
+                        ? (...args) => { // PREFIX
+                            if (!hook.enabled) {
+                                return hook.returnType ? originalFunc(...args) : originalFunc(...args);
+                            }
+                            const wrappedArgs = args.map(arg => new ValueWrapper(arg));
+                            const result = hook.callback(...wrappedArgs);
+                            args = wrappedArgs.map(arg => arg.val());
+                            if (result === undefined || result === true) {
+                                return hook.returnType ? originalFunc(...args) : originalFunc(...args);
+                            }
+                        }
+                        : (...args) => { // POSTFIX
+                            let originalResult = originalFunc(...args);
+                            if (!hook.enabled) {
+                                return hook.returnType ? originalResult : undefined;
+                            }
+                            if (originalResult !== undefined) {
+                                originalResult = new ValueWrapper(originalResult);
+                            }
+                            const wrappedArgs = args.map(arg => new ValueWrapper(arg));
+                            hook.callback(originalResult, ...wrappedArgs);
+                            return originalResult?.val();
+                        };
+            
+                    // Always create a real Wasm function object
+                    injectFunc = makeWasmFunc(hook.params, hookResults, jsImpl);
+            
+                    // Replace in table
+                    table.set(hook.tableIndex, injectFunc);
+                    hook.applied = true;
+                });
+            
+                this.logger.message("Chainloader startup complete");
+                resolve(instantiatedSource);
+            });
+            this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
 
         }));
     }
