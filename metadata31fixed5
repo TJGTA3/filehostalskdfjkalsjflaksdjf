@@ -1842,18 +1842,14 @@ class Runtime {
                 const exportEntry = [0x01, 0x67, 0x00, 0x00];
                 const exportSection = [0x07, exportEntry.length + 1, 0x01, ...exportEntry];
             
-                // Code section: empty body for the imported function
-                const funcBody = [0x00, 0x0b]; 
-                const codeSection = [0x0a, funcBody.length + 2, 0x01, funcBody.length, ...funcBody];
-            
+                // Build full module (no code section, since we only re-export an import)
                 const bytes = new Uint8Array([
                     // wasm header
                     0x00, 0x61, 0x73, 0x6d,
                     0x01, 0x00, 0x00, 0x00,
                     ...typeSection,
                     ...importSection,
-                    ...exportSection,
-                    ...codeSection,
+                    ...exportSection
                 ]);
             
                 const mod = new WebAssembly.Module(bytes);
@@ -1911,6 +1907,7 @@ class Runtime {
                 resolve(instantiatedSource);
             });
             this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
+
 
 
         }));
