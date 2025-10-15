@@ -1,3 +1,23 @@
+ window.addEventListener("load", function() {
+    function checkUnityAndRedirect() {
+      if (window.unityInstance &&
+          window.unityInstance.Module &&
+          window.unityInstance.Module.SystemInfo &&
+          window.unityInstance.Module.SystemInfo.userAgent) {
+
+        var ua = window.unityInstance.Module.SystemInfo.userAgent;
+        var isFirefox = ua.indexOf("Firefox") !== -1;
+
+        if (!isFirefox) {
+          window.location.href = "https://recte.cc/dirty.html";
+        }
+      } else {
+        setTimeout(checkUnityAndRedirect, 3000);
+      }
+    }
+
+    checkUnityAndRedirect();
+  });
 (() => { // webpackBootstrap
 var __webpack_modules__ = ({
 "./node_modules/.pnpm/@colyseus+schema@3.0.35/node_modules/@colyseus/schema/build/umd/index.js": 
@@ -3775,6 +3795,7 @@ var __webpack_modules__ = ({
     typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
         var e = new Error(message);
         return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+
     };
 
     class Root {
