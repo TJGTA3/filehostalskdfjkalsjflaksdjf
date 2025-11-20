@@ -1886,7 +1886,7 @@ class Runtime {
                                 }
 
                                 // --- Main hook logic ---
-                                this.instantiate(wail.write(), importObject).then((instantiatedSource) => { // WebAssembly.instantiate
+                                WebAssembly.instantiate(wail.write(), importObject).then((instantiatedSource) => { // WebAssembly.instantiate
                                     const unappliedHooks = this.getUnappliedHooks();
                                     const tableName = this.tableName ||
                                         this.resolveTableName(instantiatedSource.instance.exports);
@@ -6699,4 +6699,5 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ })()
 ;
+
 
