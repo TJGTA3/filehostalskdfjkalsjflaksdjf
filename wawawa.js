@@ -1711,193 +1711,236 @@ class Runtime {
         });
     }
     handleBuffer(bufferSource, importObject) {
-        return new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
-            if (!importObject)
-                importObject = {};
-            // await this.readIl2CppContextFromStorage();
-            if (!this.il2CppContext)
-                this.searchWasmBinary(bufferSource);
-            if (!this.il2CppContext) {
-                this.logger.warn("no ctx - uh oh...");
-                debugger;
-                reject();
-                return;
-            }
-            const bufferUint8Array = new Uint8Array(bufferSource);
-            const wailPreparser = new _wail__WEBPACK_IMPORTED_MODULE_5__.WailParser(bufferUint8Array);
-            wailPreparser._optionalSectionFlags |= 1 << _wail__WEBPACK_IMPORTED_MODULE_5__.SECTION_CODE;
-            wailPreparser._optionalSectionFlags |= 1 << _wail__WEBPACK_IMPORTED_MODULE_5__.SECTION_ELEMENT;
-            wailPreparser._optionalSectionFlags |= 1 << _wail__WEBPACK_IMPORTED_MODULE_5__.SECTION_TYPE;
-            wailPreparser.parse();
-            // this.resolveIl2CppFunctions(importObject);
-            const wail = new _wail__WEBPACK_IMPORTED_MODULE_5__.WailParser(bufferUint8Array);
-            // this.exportIl2CppFunctions(wail);
-            this.logger.message("Chainloader initialized");
-            this.logger.info("%d plugin(s) to load", this.plugins.length);
-            const replacementFuncIndexes = [];
-            const oldFuncIndexes = [];
-            var i = 0, pluginLen = this.plugins.length;
-            while (i < pluginLen) {
-                const usePlugin = this.plugins[i];
-                this.logger.info("Loading [%s %s]", usePlugin.name, usePlugin.version);
-                var j = 0, hookLen = usePlugin.hooks.length;
-                while (j < hookLen) {
-                    const useHook = usePlugin.hooks[j];
-                    useHook.tableIndex = this.getTableIndex(useHook.typeName, useHook.methodName);
-                    useHook.index = this.getInternalIndex(useHook.tableIndex);
-                    const injectName = useHook.typeName + "xx" + useHook.methodName + (0,_utils__WEBPACK_IMPORTED_MODULE_4__.makeId)(8);
-                    let injectFunc = null;
-                    if (!useHook.kind) {
-                        injectFunc = (...args) => __awaiter(this, void 0, void 0, function* () {
-                            // @ts-ignore
-                            yield (0,_utils__WEBPACK_IMPORTED_MODULE_4__.waitFor)(() => window.unityInstance);
-                            // @ts-ignore
-                            const _game = window.unityInstance;
-                            const tableName = this.tableName ||
-                                this.resolveTableName(_game.Module.asm);
-                            const originalFunction = _game.Module.asm[tableName].get(useHook.tableIndex);
-                            if (!useHook.enabled) {
-                                if (useHook.returnType) {
-                                    return originalFunction(...args);
+                            return new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
+                                this.logger.debug("handling buffer");
+                                if (!importObject)
+                                    importObject = {};
+                                // await this.readIl2CppContextFromStorage();
+                                if (!this.il2CppContext)
+                                    this.searchWasmBinary(bufferSource);
+                                if (!this.il2CppContext) {
+                                    this.logger.warn("no ctx - uh oh...");
+                                    debugger;
+                                    reject();
+                                    return;
                                 }
-                                originalFunction(...args);
-                                return;
-                            }
-                            const wrappedArgs = args.map((arg) => new ValueWrapper(arg));
-                            const result = useHook.callback(...wrappedArgs);
-                            // Unwrap arguments in case they were changed in the callback function
-                            args = wrappedArgs.map((arg) => arg.val());
-                            if (result === undefined || result === true) {
-                                if (useHook.returnType) {
-                                    return originalFunction(...args);
+                                const bufferUint8Array = new Uint8Array(bufferSource);
+                                const wailPreparser = new _wail__WEBPACK_IMPORTED_MODULE_5__.WailParser(bufferUint8Array);
+                                wailPreparser._optionalSectionFlags |= 1 << _wail__WEBPACK_IMPORTED_MODULE_5__.SECTION_CODE;
+                                wailPreparser._optionalSectionFlags |= 1 << _wail__WEBPACK_IMPORTED_MODULE_5__.SECTION_ELEMENT;
+                                wailPreparser._optionalSectionFlags |= 1 << _wail__WEBPACK_IMPORTED_MODULE_5__.SECTION_TYPE;
+                                wailPreparser.parse();
+                                // this.resolveIl2CppFunctions(importObject);
+                                const wail = new _wail__WEBPACK_IMPORTED_MODULE_5__.WailParser(bufferUint8Array);
+                                // this.exportIl2CppFunctions(wail);
+                                this.logger.debug("Chainloader initialized");
+                                this.logger.debug("%d plugin(s) to load", this.plugins.length);
+                                const replacementFuncIndexes = [];
+                                const oldFuncIndexes = [];
+                                var i = 0, pluginLen = this.plugins.length;
+                                while (i < pluginLen) {
+                                    const usePlugin = this.plugins[i];
+                                    this.logger.debug("Loading [%s %s]", usePlugin.name, usePlugin.version);
+                                    var j = 0, hookLen = usePlugin.hooks.length;
+                                    while (j < hookLen) {
+                                        const useHook = usePlugin.hooks[j];
+                                        useHook.tableIndex = this.getTableIndex(useHook.typeName, useHook.methodName);
+                                        useHook.index = this.getInternalIndex(useHook.tableIndex);
+                                        const injectName = useHook.typeName + "xx" + useHook.methodName + (0, _utils__WEBPACK_IMPORTED_MODULE_4__.makeId)(8);
+                                        let injectFunc = null;
+                                        if (!useHook.kind) {
+                                            injectFunc = (...args) => __awaiter(this, void 0, void 0, function* () {
+                                                // @ts-ignore
+                                                yield (0, _utils__WEBPACK_IMPORTED_MODULE_4__.waitFor)(() => window.unityInstance || window.unityGame);
+                                                // @ts-ignore
+                                                const _game = window.unityInstance || window.unityGame;
+                                                const tableName = this.tableName ||
+                                                    this.resolveTableName(_game.Module.asm);
+                                                const originalFunction = _game.Module.asm[tableName].get(useHook.tableIndex);
+                                                if (!useHook.enabled) {
+                                                    if (useHook.returnType) {
+                                                        return originalFunction(...args);
+                                                    }
+                                                    originalFunction(...args);
+                                                    return;
+                                                }
+                                                const wrappedArgs = args.map((arg) => new ValueWrapper(arg));
+                                                const result = useHook.callback(...wrappedArgs);
+                                                // Unwrap arguments in case they were changed in the callback function
+                                                args = wrappedArgs.map((arg) => arg.val());
+                                                if (result === undefined || result === true) {
+                                                    if (useHook.returnType) {
+                                                        return originalFunction(...args);
+                                                    }
+                                                    originalFunction(...args);
+                                                }
+                                            });
+                                        }
+                                        else {
+                                            injectFunc = (...args) => __awaiter(this, void 0, void 0, function* () {
+                                                // @ts-ignore
+                                                yield (0, _utils__WEBPACK_IMPORTED_MODULE_4__.waitFor)(() => window.unityInstance || window.unityGame);
+                                                // @ts-ignore
+                                                const _game = window.unityInstance || window.unityGame || game;
+                                                const tableName = this.tableName ||
+                                                    this.resolveTableName(_game.Module.asm);
+                                                const originalFunction = _game.Module.asm[tableName].get(useHook.tableIndex);
+                                                let originalResult = originalFunction(...args);
+                                                if (!useHook.enabled)
+                                                    return useHook.returnType ? originalResult : undefined;
+                                                if (originalResult !== undefined)
+                                                    originalResult = new ValueWrapper(originalResult);
+                                                const wrappedArgs = args.map((arg) => new ValueWrapper(arg));
+                                                useHook.callback(originalResult, ...wrappedArgs);
+                                                return originalResult === null || originalResult === void 0 ? void 0 : originalResult.val();
+                                            });
+                                        }
+                                        importObject.env = importObject.env || {};
+                                        importObject.env[injectName] = injectFunc;
+                                        const injectType = this.internalWasmTypes.findIndex((type) => JSON.stringify(type.params) ===
+                                            JSON.stringify(useHook.params) &&
+                                            type.returnType === useHook.returnType);
+                                        const replacementFuncIndex = wail.addImportEntry({
+                                            moduleStr: "env",
+                                            fieldStr: injectName,
+                                            kind: "func",
+                                            type: injectType,
+                                        });
+                                        replacementFuncIndexes.push(replacementFuncIndex);
+                                        const oldFuncIndex = wail.getFunctionIndex(useHook.index);
+                                        oldFuncIndexes.push(oldFuncIndex);
+                                        ++j;
+                                    }
+                                    if (usePlugin.onLoaded)
+                                        usePlugin.onLoaded();
+                                    ++i;
                                 }
-                                originalFunction(...args);
-                            }
-                        });
-                    }
-                    else {
-                        injectFunc = (...args) => __awaiter(this, void 0, void 0, function* () {
-                            // @ts-ignore
-                            yield (0,_utils__WEBPACK_IMPORTED_MODULE_4__.waitFor)(() => window.unityInstance);
-                            // @ts-ignore
-                            const _game = window.unityInstance || game;
-                            const tableName = this.tableName ||
-                                this.resolveTableName(_game.Module.asm);
-                            const originalFunction = _game.Module.asm[tableName].get(useHook.tableIndex);
-                            let originalResult = originalFunction(...args);
-                            if (!useHook.enabled)
-                                return useHook.returnType ? originalResult : undefined;
-                            if (originalResult !== undefined)
-                                originalResult = new ValueWrapper(originalResult);
-                            const wrappedArgs = args.map((arg) => new ValueWrapper(arg));
-                            useHook.callback(originalResult, ...wrappedArgs);
-                            return originalResult === null || originalResult === void 0 ? void 0 : originalResult.val();
-                        });
-                    }
-                    importObject.env = importObject.env || {};
-                    console.log(importObject);
-                    importObject.env[injectName] = injectFunc;
-                    const injectType = this.internalWasmTypes.findIndex((type) => JSON.stringify(type.params) ===
-                        JSON.stringify(useHook.params) &&
-                        type.returnType === useHook.returnType);
-                    const replacementFuncIndex = wail.addImportEntry({
-                        moduleStr: "env",
-                        fieldStr: injectName,
-                        kind: "func",
-                        type: injectType,
-                    });
-                    replacementFuncIndexes.push(replacementFuncIndex);
-                    const oldFuncIndex = wail.getFunctionIndex(useHook.index);
-                    oldFuncIndexes.push(oldFuncIndex);
-                    ++j;
-                }
-                if (usePlugin.onLoaded)
-                    usePlugin.onLoaded();
-                ++i;
-            }
-            this.logger.debug("after plugin loading importobj.env is", importObject.env);
-            this.resolveIl2CppFunctions(importObject);
-            this.exportIl2CppFunctions(wail);
-            wail.addInstructionParser(_wail__WEBPACK_IMPORTED_MODULE_5__.OP_CALL, (instrBytes) => {
-                const mappedOldFuncIndexes = oldFuncIndexes.map((item) => item.i32());
-                const reader = new _wail__WEBPACK_IMPORTED_MODULE_5__.BufferReader(instrBytes);
-                const opcode = reader.readUint8();
-                const callTarget = reader.readVarUint32();
-                if (mappedOldFuncIndexes.includes(callTarget)) {
-                    const workingIndex = mappedOldFuncIndexes.indexOf(callTarget);
-                    const workingHook = this.getHookByIndex(workingIndex);
-                    if (workingHook)
-                        workingHook.applied = true;
-                    return new Uint8Array([
-                        opcode,
-                        ...(0,_wail__WEBPACK_IMPORTED_MODULE_5__.VarUint32ToArray)(replacementFuncIndexes[workingIndex].i32()),
-                    ]);
-                }
-                return instrBytes;
-            });
-            wail.parse();
-            this.logger.debug("after wail parse importobj.env is", importObject.env);
-            WebAssembly.instantiate(wail.write(), importObject).then((instantiatedSource) => {
-                // Fallback for hooking functions that are invoked indirectly
-                const unappliedHooks = this.getUnappliedHooks();
-                const tableName = this.tableName ||
-                    this.resolveTableName(instantiatedSource.instance.exports);
-                unappliedHooks.forEach((hook) => {
-                    // @ts-ignore
-                    var originalFunc = instantiatedSource.instance.exports[tableName].get(hook.tableIndex);
-                    const hookResults = hook.returnType ? [hook.returnType] : [];
-                    let injectFunc = null;
-                    if (!hook.kind) { // PREFIX
-                        // @ts-ignore
-                        injectFunc = new WebAssembly.Function({
-                            parameters: hook.params,
-                            results: hookResults,
-                        }, (...args) => {
-                            if (!hook.enabled) {
-                                if (hook.returnType) {
-                                    return originalFunc(...args);
+                                this.logger.debug("after plugin loading importobj.env is", importObject.env);
+                                this.resolveIl2CppFunctions(importObject);
+                                this.exportIl2CppFunctions(wail);
+                                wail.addInstructionParser(_wail__WEBPACK_IMPORTED_MODULE_5__.OP_CALL, (instrBytes) => {
+                                    const mappedOldFuncIndexes = oldFuncIndexes.map((item) => item.i32());
+                                    const reader = new _wail__WEBPACK_IMPORTED_MODULE_5__.BufferReader(instrBytes);
+                                    const opcode = reader.readUint8();
+                                    const callTarget = reader.readVarUint32();
+                                    if (mappedOldFuncIndexes.includes(callTarget)) {
+                                        const workingIndex = mappedOldFuncIndexes.indexOf(callTarget);
+                                        const workingHook = this.getHookByIndex(workingIndex);
+                                        if (workingHook)
+                                            workingHook.applied = true;
+                                        return new Uint8Array([
+                                            opcode,
+                                            ...(0, _wail__WEBPACK_IMPORTED_MODULE_5__.VarUint32ToArray)(replacementFuncIndexes[workingIndex].i32()),
+                                        ]);
+                                    }
+                                    return instrBytes;
+                                });
+                                wail.parse();
+                                this.logger.debug("after wail parse importobj.env is", importObject.env);
+                                // --- Helper: wrap JS -> Wasm function ---
+                                function makeWasmFunc(params, results, jsImpl) {
+                                    // if (typeof WebAssembly.Function === "function") { // It's not in Firefox anyways so who cares
+                                    //   return new WebAssembly.Function({ parameters: params, results }, jsImpl);
+                                    // }
+
+                                    // Map textual types to Wasm codes
+                                    function wasmType(t) {
+                                        switch (t) {
+                                            case "i32": return 0x7f;
+                                            case "i64": return 0x7e;
+                                            case "f32": return 0x7d;
+                                            case "f64": return 0x7c;
+                                            default: throw new Error("Unsupported type " + t);
+                                        }
+                                    }
+
+                                    const paramTypes = params.map(wasmType);
+                                    const resultTypes = results.map(wasmType);
+
+                                    // --- Sections ---
+                                    // Type section (one function type)
+                                    const typeVec = [0x60, paramTypes.length, ...paramTypes, resultTypes.length, ...resultTypes];
+                                    const typeSection = [0x01, typeVec.length + 1, 0x01, ...typeVec];
+
+                                    // Import section: imports one function "e"."f" of type 0
+                                    const importEntry = [0x01, 0x65, 0x01, 0x66, 0x00, 0x00];
+                                    const importSection = [0x02, importEntry.length + 1, 0x01, ...importEntry];
+
+                                    // Export section: re-exports func[0] as "g"
+                                    const exportEntry = [0x01, 0x67, 0x00, 0x00];
+                                    const exportSection = [0x07, exportEntry.length + 1, 0x01, ...exportEntry];
+
+                                    // Build full module (no code section, since we only re-export an import)
+                                    const bytes = new Uint8Array([
+                                        // wasm header
+                                        0x00, 0x61, 0x73, 0x6d,
+                                        0x01, 0x00, 0x00, 0x00,
+                                        ...typeSection,
+                                        ...importSection,
+                                        ...exportSection
+                                    ]);
+
+                                    const mod = new WebAssembly.Module(bytes);
+                                    const inst = new WebAssembly.Instance(mod, { e: { f: jsImpl } });
+                                    return inst.exports.g;
                                 }
-                                originalFunc(...args);
-                                return;
-                            }
-                            const wrappedArgs = args.map((arg) => new ValueWrapper(arg));
-                            const result = hook.callback(...wrappedArgs);
-                            // Unwrap arguments in case they were changed in the callback function
-                            args = wrappedArgs.map((arg) => arg.val());
-                            if (result === undefined || result === true) {
-                                if (hook.returnType) {
-                                    return originalFunc(...args);
-                                }
-                                originalFunc(...args);
-                            }
-                        });
-                    }
-                    else { // POSTFIX
-                        // @ts-ignore
-                        injectFunc = new WebAssembly.Function({
-                            parameters: hook.params,
-                            results: hookResults,
-                        }, (...args) => {
-                            let originalResult = originalFunc(...args);
-                            if (!hook.enabled)
-                                return hook.returnType ? originalResult : undefined;
-                            if (originalResult !== undefined)
-                                originalResult = new ValueWrapper(originalResult);
-                            const wrappedArgs = args.map((arg) => new ValueWrapper(arg));
-                            hook.callback(originalResult, ...wrappedArgs);
-                            return originalResult === null || originalResult === void 0 ? void 0 : originalResult.val();
-                        });
-                    }
-                    // @ts-ignore
-                    instantiatedSource.instance.exports[tableName].set(hook.tableIndex, injectFunc);
-                    hook.applied = true;
-                });
-                this.logger.message("Chainloader startup complete");
-                resolve(instantiatedSource);
-            });
-            this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
-        }));
-    }
+
+                                // --- Main hook logic ---
+                                this.instantiate(wail.write(), importObject).then((instantiatedSource) => { // WebAssembly.instantiate
+                                    const unappliedHooks = this.getUnappliedHooks();
+                                    const tableName = this.tableName ||
+                                        this.resolveTableName(instantiatedSource.instance.exports);
+
+                                    unappliedHooks.forEach((hook) => {
+                                        if (!hook.tableIndex || !hook.index) {
+                                            hook.tableIndex = this.getTableIndex(hook.typeName, hook.methodName);
+                                            hook.index = this.getInternalIndex(hook.tableIndex);
+                                        }
+                                        const table = instantiatedSource.instance.exports[tableName];
+                                        const originalFunc = table.get(hook.tableIndex);
+                                        const hookResults = hook.returnType ? [hook.returnType] : [];
+                                        let injectFunc = null;
+
+                                        // JS implementation for prefix or postfix
+                                        const jsImpl = !hook.kind
+                                            ? (...args) => { // PREFIX
+                                                if (!hook.enabled) {
+                                                    return hook.returnType ? originalFunc(...args) : originalFunc(...args);
+                                                }
+                                                const wrappedArgs = args.map(arg => new ValueWrapper(arg));
+                                                const result = hook.callback(...wrappedArgs);
+                                                args = wrappedArgs.map(arg => arg.val());
+                                                if (result === undefined || result === true) {
+                                                    return hook.returnType ? originalFunc(...args) : originalFunc(...args);
+                                                }
+                                            }
+                                            : (...args) => { // POSTFIX
+                                                let originalResult = originalFunc(...args);
+                                                if (!hook.enabled) {
+                                                    return hook.returnType ? originalResult : undefined;
+                                                }
+                                                if (originalResult !== undefined) {
+                                                    originalResult = new ValueWrapper(originalResult);
+                                                }
+                                                const wrappedArgs = args.map(arg => new ValueWrapper(arg));
+                                                hook.callback(originalResult, ...wrappedArgs);
+                                                return originalResult?.val();
+                                            };
+
+                                        // Always create a proper Wasm function object
+                                        injectFunc = makeWasmFunc(hook.params, hookResults, jsImpl);
+
+                                        // Replace in the table
+                                        table.set(hook.tableIndex, injectFunc);
+                                        hook.applied = true;
+                                    });
+
+                                    this.logger.debug("Chainloader startup complete");
+                                    resolve(instantiatedSource);
+                                });
+                                this.logger.debug("at end of handle buffer importobj.env is", importObject.env);
+                            }));
+                        }
     searchWasmBinary(bufferSource) {
         if (!this.globalMetadata)
             return;
@@ -6656,3 +6699,4 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ })()
 ;
+
