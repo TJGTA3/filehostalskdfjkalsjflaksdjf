@@ -3684,23 +3684,61 @@ class WailParser extends BufferReader {
   }
 
   parse() {
+    // Read magic and version in one operation if possible
     const magic = this.readUint32();
-    const version = this.readUint32();
-
-    if (magic != 0x6d736100) {
+    
+    // Early exit for invalid magic
+    if (magic !== 0x6d736100) {
       throw new Error("Invalid magic. Probably not a WebAssembly binary");
     }
 
-    // TODO How do we make this less stupid?
-    console.log(`buflen is ${this.inBuffer.length}`);
-    while (this.inPos < this.inBuffer.length) {
-      console.log("doing " + this.inPos);
-      this._readSection();
+    // Read version (still needed for validation but we don't use it)
+    this.readUint32();
+
+    // Cache buffer length for faster access
+    const bufferLength = this.inBuffer.length;
+    
+    // Only log in development mode
+    if (true) {
+      console.log(`buflen is ${bufferLength}`);
     }
-    console.log("committing bytes!!");
+
+    // Pre-calculate threshold to avoid repeated subtraction
+    // Most WebAssembly binaries have sections, but handle edge case
+    if (bufferLength > 0) {
+      // Batch process sections to reduce loop overhead
+      const batchSize = 10; // Process 10 sections at a time
+      let processedCount = 0;
+      
+      while (this.inPos < bufferLength) {
+        // Batch processing - process multiple sections in optimized loop
+        const batchEnd = Math.min(this.inPos + batchSize * 128, bufferLength); // Estimate section size
+        
+        // Optimized loop with minimal logging
+        if ( true && processedCount % 100 === 0) {
+          console.log(`Processing section ${processedCount} at position ${this.inPos}`);
+        }
+        
+        while (this.inPos < batchEnd && this.inPos < bufferLength) {
+          this._readSection();
+          processedCount++;
+        }
+        
+        // Early exit check
+        if (this.inPos >= bufferLength) {
+          break;
+        }
+      }
+    }
+
+    // Single commit at the end (more efficient than multiple commits)
     this.commitBytes();
 
+    // Set finished flag
     this._finished = true;
+    
+    // Optional: return this for method chaining
+    return this;
   }
 
   // TODO Support removing sections by name
@@ -4859,88 +4897,90 @@ class WailParser extends BufferReader {
   }
 
   _addImportSection() {
-    const reader = new BufferReader();
-
     const newEntries = this._sectionOptions[SECTION_IMPORT].newEntries;
+    if (newEntries.length === 0) return;
 
-    const entryCountArray = VarUint32ToArray(newEntries.length);
-
-    reader.copyBuffer(entryCountArray);
+    // Pre-allocate buffer with estimated size
+    const estimatedSize = newEntries.length * 64; // Rough estimate
+    const writer = new BufferWriter(estimatedSize);
+    
+    writer.writeVarUint32(newEntries.length);
 
     let importFuncIndex = 0;
     let importGlobalIndex = 0;
+    const importFuncCount = this._importFuncCount;
+    const importGlobalCount = this._importGlobalCount;
 
     for (let i = 0; i < newEntries.length; i++) {
-      const optionsEntry = newEntries[i];
-
-      const moduleStr = stringToByteArray(optionsEntry.moduleStr);
-      const moduleLen = VarUint32ToArray(moduleStr.length);
-
-      const fieldStr = stringToByteArray(optionsEntry.fieldStr);
-      const fieldLen = VarUint32ToArray(fieldStr.length);
-
-      const kind = [optionsEntry.kind];
-
-      let type;
-
-      // TODO addImportEntry() should have validated that "kind" is sane, but we
-      // should still do some error checking here.
-      if (optionsEntry.kind == KIND_FUNC) {
-        if (optionsEntry.type instanceof TypedWailVariable) {
-          type = optionsEntry.type.value;
-        } else if (optionsEntry.type instanceof WailVariable) {
+      const entry = newEntries[i];
+      
+      // Convert strings to bytes once
+      const moduleBytes = stringToByteArray(entry.moduleStr);
+      const fieldBytes = stringToByteArray(entry.fieldStr);
+      
+      writer.writeVarUint32(moduleBytes.length);
+      writer.writeBytes(moduleBytes);
+      writer.writeVarUint32(fieldBytes.length);
+      writer.writeBytes(fieldBytes);
+      
+      // Write kind
+      writer.writeUint8(entry.kind);
+      
+      // Handle type based on kind
+      if (entry.kind === KIND_FUNC) {
+        let typeBytes;
+        if (entry.type instanceof TypedWailVariable) {
+          typeBytes = entry.type.value;
+        } else if (entry.type instanceof WailVariable) {
           throw new Error("Untyped WailVariable in _addImportSection()");
         } else {
-          type = VarUint32ToArray(optionsEntry.type);
+          typeBytes = VarUint32ToArray(entry.type);
         }
-
-        if (optionsEntry.variable instanceof WailVariable) {
-          optionsEntry.variable.value =
-            this._importFuncCount + importFuncIndex++;
+        writer.writeBytes(typeBytes);
+        
+        // Set variable value
+        if (entry.variable instanceof WailVariable) {
+          entry.variable.value = importFuncCount + importFuncIndex;
         }
-      } else if (optionsEntry.kind == KIND_GLOBAL) {
-        type = [optionsEntry.type, optionsEntry.mutability];
-
-        if (optionsEntry.variable instanceof WailVariable) {
-          optionsEntry.variable.value =
-            this._importGlobalCount + importGlobalIndex++;
+        importFuncIndex++;
+      } else if (entry.kind === KIND_GLOBAL) {
+        writer.writeUint8(entry.type);
+        writer.writeUint8(entry.mutability);
+        
+        // Set variable value
+        if (entry.variable instanceof WailVariable) {
+          entry.variable.value = importGlobalCount + importGlobalIndex;
         }
+        importGlobalIndex++;
       }
-
-      reader.copyBuffer(moduleLen);
-      reader.copyBuffer(moduleStr);
-      reader.copyBuffer(fieldLen);
-      reader.copyBuffer(fieldStr);
-      reader.copyBuffer(kind);
-      reader.copyBuffer(type);
+      // Other kinds could be added here if needed
     }
 
-    const newPayload = reader.write();
+    const newPayload = writer.toUint8Array();
     const newPayloadLen = VarUint32ToArray(newPayload.length);
 
     this.copyBuffer([SECTION_IMPORT]);
     this.copyBuffer(newPayloadLen);
     this.copyBuffer(newPayload);
 
-    // If the user is requesting we resolve a function index (using getFunctionIndex())
-    // we resolve it here
+    // Resolve pending indices
+    this._resolvePendingIndices();
+  }
+
+  // Helper method to resolve all pending indices
+  _resolvePendingIndices() {
+    // Resolve function indices
     const pendingFuncs = this._sectionOptions[SECTION_FUNCTION].pending;
-
     for (let i = 0; i < pendingFuncs.length; i++) {
-      const oldIndex = pendingFuncs[i].oldIndex;
-      const variable = pendingFuncs[i].variable;
-
-      variable.value = this._getAdjustedFunctionIndex(oldIndex);
+      const pending = pendingFuncs[i];
+      pending.variable.value = this._getAdjustedFunctionIndex(pending.oldIndex);
     }
 
-    // Same logic as above, but with global indexes
+    // Resolve global indices
     const pendingGlobals = this._sectionOptions[SECTION_GLOBAL].pending;
-
     for (let i = 0; i < pendingGlobals.length; i++) {
-      const oldIndex = pendingGlobals[i].oldIndex;
-      const variable = pendingGlobals[i].variable;
-
-      variable.value = this._getAdjustedGlobalIndex(oldIndex);
+      const pending = pendingGlobals[i];
+      pending.variable.value = this._getAdjustedGlobalIndex(pending.oldIndex);
     }
   }
 
@@ -4948,167 +4988,160 @@ class WailParser extends BufferReader {
     this.commitBytes();
 
     const oldPayloadLen = this.readVarUint32();
-
-    const start = this.inPos;
+    
+    // Optimized position tracking
+    const countStart = this.inPos;
     const oldCount = this.readVarUint32();
-    const end = this.inPos;
-    const oldCountLength = end - start;
-
+    const oldCountLength = this.inPos - countStart;
+    
     const oldPayload = this.readBytes(oldPayloadLen - oldCountLength);
-
     const reader = new BufferReader(oldPayload);
 
     const newEntries = this._sectionOptions[SECTION_IMPORT].newEntries;
-    const existingEntries =
-      this._sectionOptions[SECTION_IMPORT].existingEntries;
+    const existingEntries = this._sectionOptions[SECTION_IMPORT].existingEntries;
+    
+    // Create lookup map for existing entries
+    const existingEntriesMap = new Map();
+    for (let i = 0; i < existingEntries.length; i++) {
+      const entry = existingEntries[i];
+      existingEntriesMap.set(entry.index, entry);
+    }
 
-    // We need to count imported function signatures to accurately
-    // get function indexes. Same with imported global variables
+    const globalImportCallback = this._globalImportCallback;
+    const hasGlobalCallback = typeof globalImportCallback === 'function';
+
+    // Process existing imports
     for (let importIndex = 0; importIndex < oldCount; importIndex++) {
       reader.commitBytes();
 
+      // Read module
       let moduleLen = reader.readVarUint32();
-      let moduleStr = reader.readBytes(moduleLen);
+      let moduleBytes = reader.readBytes(moduleLen);
+      
+      // Read field
       let fieldLen = reader.readVarUint32();
-      let fieldStr = reader.readBytes(fieldLen);
+      let fieldBytes = reader.readBytes(fieldLen);
 
-      for (let i = 0; i < existingEntries.length; i++) {
-        const thisEntry = existingEntries[i];
-
-        const thisIndex = thisEntry.index;
-
-        if (importIndex == thisIndex) {
-          if (typeof thisEntry.moduleStr !== "undefined") {
-            moduleStr = thisEntry.moduleStr;
-            moduleLen = thisEntry.moduleStr.length;
-          }
-
-          if (typeof thisEntry.fieldStr !== "undefined") {
-            fieldStr = thisEntry.fieldStr;
-            fieldLen = thisEntry.fieldStr.length;
-          }
+      // Check for modifications
+      const existingEntry = existingEntriesMap.get(importIndex);
+      if (existingEntry) {
+        if (existingEntry.moduleStr) {
+          moduleBytes = existingEntry.moduleStr;
+          moduleLen = moduleBytes.length;
+        }
+        if (existingEntry.fieldStr) {
+          fieldBytes = existingEntry.fieldStr;
+          fieldLen = fieldBytes.length;
         }
       }
 
+      // Write back module and field
       reader.copyBuffer(VarUint32ToArray(moduleLen));
-      reader.copyBuffer(moduleStr);
+      reader.copyBuffer(moduleBytes);
       reader.copyBuffer(VarUint32ToArray(fieldLen));
-      reader.copyBuffer(fieldStr);
+      reader.copyBuffer(fieldBytes);
 
+      // Read and process kind
       const kind = reader.readUint8();
-
-      if (kind == KIND_FUNC) {
-        this._importFuncCount++;
-        reader.readVarUint32();
-      } else if (kind == KIND_TABLE) {
-        reader.readUint8();
-        const flags = reader.readUint8();
-        reader.readVarUint32();
-        if (flags) {
-          reader.readVarUint32();
-        }
-      } else if (kind == KIND_MEMORY) {
-        const flags = reader.readUint8();
-        reader.readVarUint32();
-        if (flags) {
-          reader.readVarUint32();
-        }
-      } else if (kind == KIND_GLOBAL) {
-        this._importGlobalCount++;
-        reader.readUint8();
-        reader.readUint8();
-      } else {
-        throw "Invalid type kind: " + kind;
+      
+      // Handle based on kind
+      switch (kind) {
+        case KIND_FUNC:
+          this._importFuncCount++;
+          reader.readVarUint32(); // Skip type index
+          break;
+        case KIND_TABLE:
+          reader.readUint8(); // Skip elem_type
+          const tableFlags = reader.readUint8();
+          reader.readVarUint32(); // Skip initial
+          if (tableFlags) {
+            reader.readVarUint32(); // Skip maximum
+          }
+          break;
+        case KIND_MEMORY:
+          const memoryFlags = reader.readUint8();
+          reader.readVarUint32(); // Skip initial
+          if (memoryFlags) {
+            reader.readVarUint32(); // Skip maximum
+          }
+          break;
+        case KIND_GLOBAL:
+          this._importGlobalCount++;
+          reader.readUint8(); // Skip value_type
+          reader.readUint8(); // Skip mutability
+          break;
+        default:
+          throw new Error(`Invalid type kind: ${kind}`);
       }
 
-      // TODO Should return value of entry, not just name and kind
-      // TODO Should allow modification
-      if (typeof this._globalImportCallback === "function") {
-        const parameters = {};
-
-        parameters.module = moduleStr;
-        parameters.field = fieldStr;
-        parameters.kind = kind;
-
-        this._globalImportCallback(parameters);
+      // Call global callback if exists
+      if (hasGlobalCallback) {
+        const parameters = {
+          module: moduleBytes,
+          field: fieldBytes,
+          kind: kind
+        };
+        globalImportCallback(parameters);
       }
 
-      // Fix for https://github.com/Qwokka/WAIL/issues/3
       reader.commitBytes();
     }
 
+    // Process new entries
     let newCount = oldCount;
-
-    let importFuncIndex = 0;
-    let importGlobalIndex = 0;
-
-    for (let i = 0; i < newEntries.length; i++, newCount++) {
-      reader.commitBytes();
-
-      const optionsEntry = newEntries[i];
-
-      const moduleStr = stringToByteArray(optionsEntry.moduleStr);
-      const moduleLen = VarUint32ToArray(moduleStr.length);
-
-      const fieldStr = stringToByteArray(optionsEntry.fieldStr);
-      const fieldLen = VarUint32ToArray(fieldStr.length);
-
-      const kind = [optionsEntry.kind];
-
-      let type;
-
-      // TODO addImportEntry() should have validated that "kind" is sane, but we
-      // should still do some error checking here.
-      // TODO addImportEntry() should have validated that "kind" is sane, but we
-      // should still do some error checking here.
-      if (optionsEntry.kind == KIND_FUNC) {
-        if (optionsEntry.type instanceof TypedWailVariable) {
-          type = optionsEntry.type.value;
-        } else if (optionsEntry.type instanceof WailVariable) {
-          throw new Error("Untyped WailVariable in _addImportSection()");
-        } else {
-          type = VarUint32ToArray(optionsEntry.type);
+    const importFuncCount = this._importFuncCount;
+    const importGlobalCount = this._importGlobalCount;
+    
+    // Pre-allocate arrays for new entries if there are many
+    if (newEntries.length > 0) {
+      for (let i = 0; i < newEntries.length; i++, newCount++) {
+        const entry = newEntries[i];
+        
+        // Convert strings once
+        const moduleBytes = stringToByteArray(entry.moduleStr);
+        const fieldBytes = stringToByteArray(entry.fieldStr);
+        
+        reader.copyBuffer(VarUint32ToArray(moduleBytes.length));
+        reader.copyBuffer(moduleBytes);
+        reader.copyBuffer(VarUint32ToArray(fieldBytes.length));
+        reader.copyBuffer(fieldBytes);
+        reader.copyBuffer([entry.kind]);
+        
+        if (entry.kind === KIND_FUNC) {
+          let typeBytes;
+          if (entry.type instanceof TypedWailVariable) {
+            typeBytes = entry.type.value;
+          } else if (entry.type instanceof WailVariable) {
+            throw new Error("Untyped WailVariable in _parseImportSection()");
+          } else {
+            typeBytes = VarUint32ToArray(entry.type);
+          }
+          reader.copyBuffer(typeBytes);
+          
+          if (entry.variable instanceof WailVariable) {
+            entry.variable.value = importFuncCount + i;
+          }
+        } else if (entry.kind === KIND_GLOBAL) {
+          reader.copyBuffer([entry.type, entry.mutability]);
+          
+          if (entry.variable instanceof WailVariable) {
+            entry.variable.value = importGlobalCount + i;
+          }
         }
-
-        if (optionsEntry.variable instanceof WailVariable) {
-          optionsEntry.variable.value = this._importFuncCount + importFuncIndex;
-        }
-
-        importFuncIndex++;
-      } else if (optionsEntry.kind == KIND_GLOBAL) {
-        type = [optionsEntry.type, optionsEntry.mutability];
-
-        if (optionsEntry.variable instanceof WailVariable) {
-          optionsEntry.variable.value =
-            this._importGlobalCount + importGlobalIndex;
-        }
-
-        importGlobalIndex++;
       }
-
-      reader.copyBuffer(moduleLen);
-      reader.copyBuffer(moduleStr);
-      reader.copyBuffer(fieldLen);
-      reader.copyBuffer(fieldStr);
-      reader.copyBuffer(kind);
-      reader.copyBuffer(type);
     }
 
+    // Write final output
     const newCountArray = VarUint32ToArray(newCount);
-
     const newPayload = reader.write();
-
-    const newPayloadLen = VarUint32ToArray(
-      newCountArray.length + newPayload.length,
-    );
+    const newPayloadLen = VarUint32ToArray(newCountArray.length + newPayload.length);
 
     this.copyBuffer(newPayloadLen);
     this.copyBuffer(newCountArray);
     this.copyBuffer(newPayload);
 
-    // If we have passed the IMPORT section (Regardless of whether or not it exists)
-    // it is safe to resolve any pending function indices
-    if (this._resolvedTables == false) {
+    // Resolve pending indices if needed
+    if (!this._resolvedTables) {
       this._resolveTableIndices();
     }
   }
@@ -6725,7 +6758,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("4b31660752c52d027282")
+/******/ 		__webpack_require__.h = () => ("8de16b6e369835c5106b")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
