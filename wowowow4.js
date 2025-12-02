@@ -1446,35 +1446,81 @@ function preload() {
     return loadWebData();
 }
 function loadWebData() {
-    logger.debug("Trying to load Unity web data from indexedDB cache");
-    return new Promise((resolve) => {
-        indexedDB.databases().then((databases) => __awaiter(this, void 0, void 0, function* () {
-            const unityCache = databases.findIndex((d) => d.name === "UnityCache");
-            if (unityCache == -1) {
-                resolve(yield fallbackInterceptFetch());
-                return;
+    return __awaiter(this, void 0, void 0, function* () {
+        logger.debug("Attempting to load Unity web data from IndexedDB...");
+        try {
+            const databases = yield indexedDB.databases();
+            logger.debug("IndexedDB databases found:", databases);
+            const unityCacheIndex = databases.findIndex((d) => d.name === "UnityCache");
+            if (unityCacheIndex === -1) {
+                logger.debug("UnityCache DB not found — using fallback.");
+                return yield fallbackInterceptFetch();
             }
-            const request = window.indexedDB.open("UnityCache", 3);
-            request.onsuccess = (event) => {
-                const db = event.target.result;
-                const requestCacheEntries = db
-                    .transaction(["RequestStore"], "readonly")
-                    .objectStore("RequestStore")
-                    .getAll();
-                requestCacheEntries.onsuccess = (event) => __awaiter(this, void 0, void 0, function* () {
-                    const entries = event.target.result;
-                    if (entries.length === 0) {
-                        resolve(yield fallbackInterceptFetch());
-                        return;
-                    }
-                    resolve(parseWebData(entries[0].response.parsedBody.buffer));
-                });
-                requestCacheEntries.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                    db.close();
+            logger.debug("UnityCache found — opening DB...");
+            return yield new Promise((resolve) => {
+                const request = indexedDB.open("UnityCache", 3);
+                request.onerror = (ev) => __awaiter(this, void 0, void 0, function* () {
+                    logger.error("Failed to open UnityCache DB:", request.error);
                     resolve(yield fallbackInterceptFetch());
                 });
-            };
-        }));
+                request.onupgradeneeded = () => {
+                    logger.warn("UnityCache schema mismatch — upgrade needed. Using fallback.");
+                };
+                request.onsuccess = (ev) => __awaiter(this, void 0, void 0, function* () {
+                    const db = ev.target.result;
+                    logger.debug("UnityCache DB opened successfully.");
+                    try {
+                        const tx = db.transaction(["RequestStore"], "readonly");
+                        const store = tx.objectStore("RequestStore");
+                        logger.debug("Reading cached RequestStore entries...");
+                        const getAllReq = store.getAll();
+                        getAllReq.onerror = () => __awaiter(this, void 0, void 0, function* () {
+                            logger.error("Failed to read RequestStore:", getAllReq.error);
+                            db.close();
+                            resolve(yield fallbackInterceptFetch());
+                        });
+                        getAllReq.onsuccess = (ev2) => __awaiter(this, void 0, void 0, function* () {
+                            var _a, _b;
+                            const entries = ev2.target.result;
+                            logger.debug(`Found ${entries.length} cached entries.`);
+                            if (!entries || entries.length === 0) {
+                                logger.debug("Cache empty — using fallback.");
+                                db.close();
+                                resolve(yield fallbackInterceptFetch());
+                                return;
+                            }
+                            try {
+                                const buffer = (_b = (_a = entries[0].response) === null || _a === void 0 ? void 0 : _a.parsedBody) === null || _b === void 0 ? void 0 : _b.buffer;
+                                if (!buffer) {
+                                    logger.error("Cache entry missing parsedBody buffer — using fallback.");
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                    return;
+                                }
+                                logger.debug("Parsing cached web data...");
+                                const parsed = parseWebData(buffer);
+                                db.close();
+                                resolve(parsed);
+                            }
+                            catch (err) {
+                                logger.error("Error parsing cached entry:", err);
+                                db.close();
+                                resolve(yield fallbackInterceptFetch());
+                            }
+                        });
+                    }
+                    catch (err) {
+                        logger.error("Unexpected DB transaction error:", err);
+                        db.close();
+                        resolve(yield fallbackInterceptFetch());
+                    }
+                });
+            });
+        }
+        catch (err) {
+            logger.error("Unexpected error while loading web data:", err);
+            return yield fallbackInterceptFetch();
+        }
     });
 }
 function fallbackInterceptFetch() {
@@ -6670,7 +6716,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("36b28cb4136c98f62b50")
+/******/ 		__webpack_require__.h = () => ("5dfa9659e05ba01ff286")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
@@ -6699,4 +6745,3 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ })()
 ;
-
