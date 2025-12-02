@@ -1458,7 +1458,7 @@ function loadWebData() {
             }
             logger.debug("UnityCache found — opening DB...");
             return yield new Promise((resolve) => {
-                const request = indexedDB.open("UnityCache", 3);
+                const request = indexedDB.open("UnityCache");
                 request.onerror = (ev) => __awaiter(this, void 0, void 0, function* () {
                     logger.error("Failed to open UnityCache DB:", request.error);
                     resolve(yield fallbackInterceptFetch());
@@ -6716,7 +6716,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("5dfa9659e05ba01ff286")
+/******/ 		__webpack_require__.h = () => ("3250ee9e935a208d16e7")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
