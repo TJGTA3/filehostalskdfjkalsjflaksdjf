@@ -804,11 +804,17 @@ var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _argume
 
 
 function createIl2CppContext(buffer, metadata, referencedAssemblies) {
-    console.log("createIl2CppContext");
+    // Remove console.log in production
+    if (true) {
+        console.log("createIl2CppContext");
+    }
+    // Phase 1: Parse data sections
     const dataSections = [];
     const reader = new _utils_binary__WEBPACK_IMPORTED_MODULE_1__.BinaryReader(buffer);
     reader.seek(8);
-    while (reader.offset < buffer.byteLength) {
+    // Use while loop efficiently
+    const bufferLength = buffer.byteLength;
+    while (reader.offset < bufferLength) {
         const id = reader.readULEB128();
         const len = reader.readULEB128();
         if (id !== 11) {
@@ -816,86 +822,145 @@ function createIl2CppContext(buffer, metadata, referencedAssemblies) {
             reader.seek(reader.offset + len);
             continue;
         }
+        // Found data section
         const count = reader.readULEB128();
+        // Pre-allocate array for better performance
+        dataSections.length = count;
         for (let i = 0; i < count; i++) {
             const index = reader.readULEB128();
-            reader.seek(reader.offset + 1);
+            reader.seek(reader.offset + 1); // Skip instruction
             const offset = reader.readULEB128();
-            reader.seek(reader.offset + 1);
+            reader.seek(reader.offset + 1); // Skip instruction
             const data = reader.readUint8Array(reader.readULEB128());
-            dataSections.push({
+            dataSections[i] = {
                 index,
                 offset,
                 data,
-            });
+            };
         }
-        break;
+        break; // Found data section, exit loop
     }
+    if (dataSections.length === 0) {
+        console.warn("No data sections found in WebAssembly binary");
+        // Continue anyway or return early
+    }
+    // Phase 2: Initialize memory buffer
     const last = dataSections[dataSections.length - 1];
     const bssStart = last.offset + last.data.length;
-    // Initialized memory buffer
+    // Use single ArrayBuffer and DataView for better performance
     const memoryBuffer = new ArrayBuffer(buffer.byteLength);
+    const dataView = new DataView(memoryBuffer);
+    // Write data sections directly to memory buffer
+    for (let i = 0; i < dataSections.length; i++) {
+        const section = dataSections[i];
+        const sectionData = section.data;
+        // Use DataView.set for bulk copy
+        for (let j = 0; j < sectionData.length; j++) {
+            dataView.setUint8(section.offset + j, sectionData[j]);
+        }
+    }
+    // Phase 3: Find code registration
     const memoryReader = new _utils_binary__WEBPACK_IMPORTED_MODULE_1__.BinaryReader(memoryBuffer);
-    const memoryWriter = new _utils_binary__WEBPACK_IMPORTED_MODULE_1__.BinaryWriter(memoryBuffer);
-    dataSections.forEach((dataSection) => {
-        memoryWriter.seek(dataSection.offset);
-        memoryWriter.writeBytes(dataSection.data);
-    });
-    // Plus search
     const sectionHelper = getSectionHelper(buffer.byteLength, memoryBuffer, bssStart, metadata.methodDefs.length, metadata.originalImageDefCount);
     const codeRegistration = sectionHelper.findCodeRegistration();
+    if (!codeRegistration) {
+        console.error("Code registration not found");
+    }
     const pCodeRegistration = readCodeRegistration(memoryReader, codeRegistration);
+    // Phase 4: Process code gen modules
     const pCodeGenModules = readCodeGenModules(memoryReader, pCodeRegistration.codeGenModules, pCodeRegistration.codeGenModulesCount);
     const codeGenModules = {};
     const codeGenModuleMethodPointers = {};
+    const referencedAssembliesSet = referencedAssemblies ? new Set(referencedAssemblies) : null;
+    // Pre-allocate lookup tables for metadata
+    // Fix TypeScript types or check for property existence
+    const typeDefsByIndex = new Map();
+    const methodDefsByIndex = new Map();
+    // Use type assertion or optional chaining
+    for (const typeDef of metadata.typeDefs) {
+        if ('typeIndex' in typeDef && typeDef.typeIndex !== undefined) {
+            typeDefsByIndex.set(typeDef.typeIndex, typeDef);
+        }
+    }
+    for (const methodDef of metadata.methodDefs) {
+        if ('methodIndex' in methodDef && methodDef.methodIndex !== undefined) {
+            methodDefsByIndex.set(methodDef.methodIndex, methodDef);
+        }
+    }
+    // Process modules
     for (let i = 0; i < pCodeGenModules.length; i++) {
         const pCodeGenModule = readCodeGenModule(memoryReader, pCodeGenModules[i]);
         memoryReader.seek(pCodeGenModule.moduleName);
         const moduleName = memoryReader.readNullTerminatedUTF8String();
-        if (!(referencedAssemblies === null || referencedAssemblies === void 0 ? void 0 : referencedAssemblies.includes(moduleName)))
+        // Skip if not in referenced assemblies
+        if (referencedAssembliesSet && !referencedAssembliesSet.has(moduleName)) {
             continue;
+        }
         codeGenModules[moduleName] = pCodeGenModule;
         const methodPointers = readCodeGenModuleMethodPointers(memoryReader, pCodeGenModule.methodPointers, pCodeGenModule.methodPointerCount);
         codeGenModuleMethodPointers[moduleName] = methodPointers;
     }
+    // Phase 5: Build script data
     const scriptData = {};
     const metadataReader = new _utils_binary__WEBPACK_IMPORTED_MODULE_1__.BinaryReader(metadata.buffer);
+    const stringOffset = metadata.header.stringOffset;
+    // Cache string lookups
+    const stringCache = new Map();
+    const getCachedString = (index) => {
+        let cached = stringCache.get(index);
+        if (!cached) {
+            cached = getStringFromIndex(metadataReader, stringOffset, index);
+            stringCache.set(index, cached);
+        }
+        return cached;
+    };
+    // Process metadata more efficiently
     for (let j = 0; j < metadata.imageDefs.length; j++) {
-        let imageDef = metadata.imageDefs[j];
-        let imageName = getStringFromIndex(metadataReader, metadata.header.stringOffset, imageDef.nameIndex);
-        let typeEnd = imageDef.typeStart + imageDef.typeCount;
+        const imageDef = metadata.imageDefs[j];
+        const imageName = getCachedString(imageDef.nameIndex);
+        // Check if this image has method pointers
+        const ptrs = codeGenModuleMethodPointers[imageName];
+        if (!ptrs)
+            continue;
+        const typeEnd = imageDef.typeStart + imageDef.typeCount;
         for (let k = imageDef.typeStart; k < typeEnd; k++) {
-            let typeDef = metadata.typeDefs.find((def) => def.typeIndex === k);
+            const typeDef = typeDefsByIndex.get(k);
             if (!typeDef)
                 continue;
-            let typeName = getStringFromIndex(metadataReader, metadata.header.stringOffset, typeDef.nameIndex);
-            const namespaceName = getStringFromIndex(metadataReader, metadata.header.stringOffset, typeDef.namespaceIndex);
-            let methodEnd = typeDef.methodStart + typeDef.method_count;
+            const typeName = getCachedString(typeDef.nameIndex);
+            const namespaceName = getCachedString(typeDef.namespaceIndex);
+            const fullTypeName = namespaceName === "" ? typeName : namespaceName + "." + typeName;
+            // Initialize script data entry
+            if (!scriptData[fullTypeName]) {
+                scriptData[fullTypeName] = {};
+            }
+            const typeScriptData = scriptData[fullTypeName];
+            const methodEnd = typeDef.methodStart + typeDef.method_count;
             for (let l = typeDef.methodStart; l < methodEnd; l++) {
-                let methodDef = metadata.methodDefs.find((def) => def.methodIndex === l);
+                const methodDef = methodDefsByIndex.get(l);
                 if (!methodDef)
                     continue;
-                let methodName = getStringFromIndex(metadataReader, metadata.header.stringOffset, methodDef.nameIndex);
-                let methodToken = methodDef.token;
-                let ptrs = codeGenModuleMethodPointers[imageName];
-                let methodPointerIndex = methodToken & 0x00ffffff;
+                const methodName = getCachedString(methodDef.nameIndex);
+                const methodPointerIndex = methodDef.token & 0x00ffffff;
                 const ptr = ptrs[methodPointerIndex - 1];
-                const fullTypeName = namespaceName === "" ? typeName : namespaceName + "." + typeName;
-                if (!scriptData[fullTypeName]) {
-                    scriptData[fullTypeName] = {}; // Create an empty object if it doesn't exist
+                if (ptr === undefined)
+                    continue;
+                // Handle duplicate method names
+                let finalMethodName = methodName;
+                if (typeScriptData[methodName] !== undefined) {
+                    const existingPtr = typeScriptData[methodName];
+                    delete typeScriptData[methodName];
+                    const uniqueName = `${methodName}_${existingPtr}`;
+                    typeScriptData[uniqueName] = existingPtr;
+                    finalMethodName = `${methodName}_${ptr}`;
                 }
-                if (scriptData[fullTypeName][methodName] !== undefined) {
-                    const ptrRef = scriptData[fullTypeName][methodName];
-                    delete scriptData[fullTypeName][methodName];
-                    scriptData[fullTypeName][methodName + "_" + ptrRef] = ptrRef;
-                    methodName = `${methodName}_${ptr}`;
-                }
-                scriptData[fullTypeName][methodName] = ptr;
+                typeScriptData[finalMethodName] = ptr;
             }
         }
     }
-    metadata.typeDefs.forEach((def) => delete def.typeIndex);
-    metadata.methodDefs.forEach((def) => delete def.methodIndex);
+    // Phase 6: Clean up (optional - can be skipped if not needed)
+    // metadata.typeDefs.forEach((def) => delete def.typeIndex);
+    // metadata.methodDefs.forEach((def) => delete def.methodIndex);
     return (0,neverthrow__WEBPACK_IMPORTED_MODULE_0__.ok)({
         codeGenModules,
         codeGenModuleMethodPointers,
@@ -6758,7 +6823,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("8de16b6e369835c5106b")
+/******/ 		__webpack_require__.h = () => ("8108b13afe428bab16fc")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
