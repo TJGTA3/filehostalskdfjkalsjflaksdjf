@@ -1443,124 +1443,73 @@ function preload() {
     logger.info("UnityWebModkit v%s - %s", _mod__WEBPACK_IMPORTED_MODULE_2__.version, window.location.hostname);
     // @ts-ignore Set by webpack at bundle time
     logger.info("Build hash: %s", __webpack_require__.h());
-    return loadWebData();
+    return preloadInternal();
+}
+function preloadInternal() {
+    return __awaiter(this, void 0, void 0, function* () {
+        logger.debug("[Preloader] Clearing Unity caches...");
+        yield clearUnityCache();
+        logger.debug("[Preloader] Loading Unity web data using fetch...");
+        return yield loadWebData();
+    });
 }
 function loadWebData() {
     return __awaiter(this, void 0, void 0, function* () {
-        logger.debug("[Preloader] Attempting to load Unity web data from IndexedDB...");
-        const databases = yield indexedDB.databases();
-        logger.debug("[Preloader] IndexedDB databases found: ", databases);
-        const unityCacheExists = databases.some(db => db.name === "UnityCache");
-        if (!unityCacheExists) {
-            logger.warn("[Preloader] UnityCache DB not found — falling back.");
-            return yield fallbackInterceptFetch();
-        }
-        logger.debug("[Preloader] UnityCache found — opening DB...");
-        const openReq = indexedDB.open("UnityCache");
+        logger.debug("[Preloader] Skipping IndexedDB — always using fetch method.");
+        return yield fallbackInterceptFetch();
+    });
+}
+// ---------------------------------------------------------------------------
+// Cache Clearing Utilities
+// ---------------------------------------------------------------------------
+function clearUnityIndexedDB() {
+    return __awaiter(this, void 0, void 0, function* () {
         return new Promise((resolve) => {
-            openReq.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                logger.error("[Preloader] Failed to open UnityCache DB:", openReq.error);
-                resolve(yield fallbackInterceptFetch());
-            });
-            openReq.onsuccess = () => __awaiter(this, void 0, void 0, function* () {
-                const db = openReq.result;
-                logger.debug("[Preloader] UnityCache DB opened successfully.");
-                const stores = Array.from(db.objectStoreNames);
-                logger.debug("[Preloader] Object stores: ", stores);
-                // --- OLD SCHEMA ----------------------------------------------------------
-                if (stores.includes("RequestStore")) {
-                    logger.debug("[Preloader] Using old Unity cache schema (RequestStore).");
-                    const tx = db.transaction(["RequestStore"], "readonly");
-                    const req = tx.objectStore("RequestStore").getAll();
-                    req.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                        logger.error("[Preloader] RequestStore getAll() failed.");
-                        resolve(yield fallbackInterceptFetch());
-                    });
-                    req.onsuccess = () => __awaiter(this, void 0, void 0, function* () {
-                        const data = req.result;
-                        if (!data || data.length === 0) {
-                            logger.warn("[Preloader] RequestStore empty — falling back.");
-                            resolve(yield fallbackInterceptFetch());
-                            return;
-                        }
-                        logger.debug("[Preloader] Loaded data from RequestStore.");
-                        resolve(parseWebData(data[0].response.parsedBody.buffer));
-                    });
-                    return;
-                }
-                // --- NEW SCHEMA ----------------------------------------------------------
-                if (stores.includes("RequestMetaDataStore")) {
-                    logger.debug("[Preloader] Using new Unity cache schema (RequestMetaDataStore).");
-                    const tx = db.transaction(["RequestMetaDataStore"], "readonly");
-                    const req = tx.objectStore("RequestMetaDataStore").getAll();
-                    req.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                        logger.error("[Preloader] Failed to read metadata — falling back.");
-                        resolve(yield fallbackInterceptFetch());
-                    });
-                    req.onsuccess = () => __awaiter(this, void 0, void 0, function* () {
-                        const metadata = req.result;
-                        logger.debug("[Preloader] Found", metadata.length, "metadata entries.");
-                        if (!metadata || metadata.length === 0) {
-                            logger.warn("[Preloader] Metadata store empty — falling back.");
-                            resolve(yield fallbackInterceptFetch());
-                            return;
-                        }
-                        const entry = metadata[0];
-                        logger.debug("[Preloader] Metadata entry:", entry);
-                        // No responseBodyKey → load using CacheStorage!
-                        if (!entry.responseBodyKey) {
-                            logger.warn("[Preloader] No responseBodyKey — trying CacheStorage.");
-                            try {
-                                const cache = yield caches.open("UnityCache");
-                                const cached = yield cache.match(entry.url);
-                                if (!cached) {
-                                    logger.warn("[Preloader] CacheStorage has no entry for URL — falling back.");
-                                    resolve(yield fallbackInterceptFetch());
-                                    return;
-                                }
-                                logger.debug("[Preloader] Loaded .data file from CacheStorage.");
-                                const buf = yield cached.arrayBuffer();
-                                resolve(parseWebData(buf));
-                                return;
-                            }
-                            catch (e) {
-                                logger.error("[Preloader] CacheStorage read failed:", e);
-                                resolve(yield fallbackInterceptFetch());
-                                return;
-                            }
-                        }
-                        // If responseBodyKey DOES exist (future proof)
-                        if (stores.includes("ResponseBodyStore")) {
-                            logger.debug("[Preloader] Found responseBodyKey — loading ResponseBodyStore...");
-                            const tx2 = db.transaction(["ResponseBodyStore"], "readonly");
-                            const req2 = tx2.objectStore("ResponseBodyStore").get(entry.responseBodyKey);
-                            req2.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                                logger.error("[Preloader] Failed to read ResponseBodyStore — falling back.");
-                                resolve(yield fallbackInterceptFetch());
-                            });
-                            req2.onsuccess = () => __awaiter(this, void 0, void 0, function* () {
-                                const bodyEntry = req2.result;
-                                if (!bodyEntry || !bodyEntry.body) {
-                                    logger.warn("[Preloader] ResponseBodyStore entry missing body.");
-                                    resolve(yield fallbackInterceptFetch());
-                                    return;
-                                }
-                                logger.debug("[Preloader] Loaded buffer from ResponseBodyStore.");
-                                resolve(parseWebData(bodyEntry.body));
-                            });
-                            return;
-                        }
-                        // No body store at all
-                        logger.warn("[Preloader] No matching body store — falling back.");
-                        resolve(yield fallbackInterceptFetch());
-                    });
-                    return;
-                }
-                // --- NO RECOGNIZED SCHEMA -----------------------------------------------
-                logger.warn("[Preloader] No known object stores in UnityCache — falling back.");
-                resolve(yield fallbackInterceptFetch());
-            });
+            const req = indexedDB.deleteDatabase("UnityCache");
+            req.onerror = () => {
+                console.warn("[Preloader] Failed to delete UnityCache IndexedDB.");
+                resolve();
+            };
+            req.onsuccess = () => {
+                console.log("[Preloader] UnityCache IndexedDB deleted.");
+                resolve();
+            };
+            req.onblocked = () => {
+                console.warn("[Preloader] Delete blocked — page may need reload.");
+            };
         });
+    });
+}
+function clearUnityCacheStorage() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const deleted = yield caches.delete("UnityCache");
+            console.log("[Preloader] CacheStorage UnityCache deleted:", deleted);
+        }
+        catch (e) {
+            console.warn("[Preloader] Failed to clear CacheStorage UnityCache:", e);
+        }
+    });
+}
+function clearUnityCache() {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log("[Preloader] Clearing all Unity caches...");
+        yield clearUnityIndexedDB();
+        yield clearUnityCacheStorage();
+        // Remove any other Unity-named caches
+        try {
+            const names = yield caches.keys();
+            for (const n of names) {
+                if (n.toLowerCase().includes("unity")) {
+                    yield caches.delete(n);
+                    console.log("[Preloader] Deleted cache:", n);
+                }
+            }
+        }
+        catch (e) {
+            console.warn("[Preloader] Failed checking CacheStorage keys:", e);
+        }
+        console.log("[Preloader] All Unity caches cleared.");
     });
 }
 function fallbackInterceptFetch() {
@@ -6756,7 +6705,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("f7c732d82090318b7ad0")
+/******/ 		__webpack_require__.h = () => ("b668d9f351693c4d953d")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
