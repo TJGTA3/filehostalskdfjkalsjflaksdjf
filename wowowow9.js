@@ -1469,58 +1469,144 @@ function loadWebData() {
                 request.onsuccess = (ev) => __awaiter(this, void 0, void 0, function* () {
                     const db = ev.target.result;
                     logger.debug("UnityCache DB opened successfully.");
-                    logger.debug("Object stores:", Array.from(db.objectStoreNames));
-                    // If Unity changed the schema (common), fallback gracefully.
-                    if (!db.objectStoreNames.contains("RequestStore")) {
-                        logger.warn("RequestStore not found in UnityCache DB — Unity likely changed cache schema. Falling back.");
+                    const stores = Array.from(db.objectStoreNames);
+                    logger.debug("Object stores:", stores);
+                    const hasRequestStore = stores.includes("RequestStore");
+                    const hasMetaStore = stores.includes("RequestMetaDataStore");
+                    if (!hasRequestStore && !hasMetaStore) {
+                        logger.warn("No usable cache stores found. Falling back.");
                         db.close();
                         resolve(yield fallbackInterceptFetch());
                         return;
                     }
-                    try {
-                        const tx = db.transaction(["RequestStore"], "readonly");
-                        const store = tx.objectStore("RequestStore");
-                        logger.debug("Reading cached RequestStore entries...");
-                        const getAllReq = store.getAll();
-                        getAllReq.onerror = () => __awaiter(this, void 0, void 0, function* () {
-                            logger.error("Failed to read RequestStore:", getAllReq.error);
+                    // ========== SCHEMA 1: OLD UNITY (RequestStore) ==========
+                    if (hasRequestStore) {
+                        logger.debug("Using old Unity cache schema (RequestStore).");
+                        try {
+                            const tx = db.transaction(["RequestStore"], "readonly");
+                            const store = tx.objectStore("RequestStore");
+                            const reqAll = store.getAll();
+                            reqAll.onerror = () => __awaiter(this, void 0, void 0, function* () {
+                                logger.error("Failed reading RequestStore:", reqAll.error);
+                                db.close();
+                                resolve(yield fallbackInterceptFetch());
+                            });
+                            reqAll.onsuccess = (ev2) => __awaiter(this, void 0, void 0, function* () {
+                                var _a, _b, _c, _d, _e, _f;
+                                const entries = ev2.target.result;
+                                logger.debug(`Found ${entries.length} entries in RequestStore.`);
+                                if (!entries.length) {
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                    return;
+                                }
+                                const buffer = (_d = (_c = (_b = (_a = entries[0]) === null || _a === void 0 ? void 0 : _a.response) === null || _b === void 0 ? void 0 : _b.parsedBody) === null || _c === void 0 ? void 0 : _c.buffer) !== null && _d !== void 0 ? _d : (_f = (_e = entries[0]) === null || _e === void 0 ? void 0 : _e.response) === null || _f === void 0 ? void 0 : _f.buffer;
+                                if (!buffer) {
+                                    logger.error("Parsed buffer missing in RequestStore.");
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                    return;
+                                }
+                                try {
+                                    const parsed = parseWebData(buffer);
+                                    db.close();
+                                    resolve(parsed);
+                                }
+                                catch (err) {
+                                    logger.error("Parsing RequestStore buffer failed:", err);
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                }
+                            });
+                        }
+                        catch (err) {
+                            logger.error("Unexpected error reading RequestStore:", err);
                             db.close();
                             resolve(yield fallbackInterceptFetch());
-                        });
-                        getAllReq.onsuccess = (ev2) => __awaiter(this, void 0, void 0, function* () {
-                            var _a, _b, _c, _d, _e, _f;
-                            const entries = ev2.target.result;
-                            logger.debug(`Found ${entries.length} cached entries.`);
-                            if (!entries || entries.length === 0) {
-                                logger.debug("Cache empty — using fallback.");
-                                db.close();
-                                resolve(yield fallbackInterceptFetch());
-                                return;
-                            }
-                            const buffer = (_d = (_c = (_b = (_a = entries[0]) === null || _a === void 0 ? void 0 : _a.response) === null || _b === void 0 ? void 0 : _b.parsedBody) === null || _c === void 0 ? void 0 : _c.buffer) !== null && _d !== void 0 ? _d : (_f = (_e = entries[0]) === null || _e === void 0 ? void 0 : _e.response) === null || _f === void 0 ? void 0 : _f.buffer;
-                            if (!buffer) {
-                                logger.error("Cached entry missing parsedBody buffer — Unity cache schema may have changed. Using fallback.");
-                                db.close();
-                                resolve(yield fallbackInterceptFetch());
-                                return;
-                            }
-                            logger.debug("Parsing cached web data...");
-                            try {
-                                const parsed = parseWebData(buffer);
-                                db.close();
-                                resolve(parsed);
-                            }
-                            catch (err) {
-                                logger.error("Error parsing cached entry:", err);
-                                db.close();
-                                resolve(yield fallbackInterceptFetch());
-                            }
-                        });
+                        }
+                        return;
                     }
-                    catch (err) {
-                        logger.error("Unexpected DB transaction error:", err);
-                        db.close();
-                        resolve(yield fallbackInterceptFetch());
+                    // ========== SCHEMA 2: NEW UNITY (RequestMetaDataStore) ==========
+                    if (hasMetaStore) {
+                        logger.debug("Using new Unity cache schema (RequestMetaDataStore).");
+                        try {
+                            const tx = db.transaction(["RequestMetaDataStore"], "readonly");
+                            const store = tx.objectStore("RequestMetaDataStore");
+                            const reqAll = store.getAll();
+                            reqAll.onerror = () => __awaiter(this, void 0, void 0, function* () {
+                                logger.error("Failed reading RequestMetaDataStore:", reqAll.error);
+                                db.close();
+                                resolve(yield fallbackInterceptFetch());
+                            });
+                            reqAll.onsuccess = (ev2) => __awaiter(this, void 0, void 0, function* () {
+                                var _g, _h, _j;
+                                const metaEntries = ev2.target.result;
+                                logger.debug(`Found ${metaEntries.length} metadata entries.`);
+                                if (!metaEntries.length) {
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                    return;
+                                }
+                                // New Unity format: metadata contains URL → response stored separately
+                                const first = metaEntries[0];
+                                logger.debug("Metadata entry:", first);
+                                // Look for Unity’s cached response body key
+                                const bodyKey = (_j = (_h = (_g = first === null || first === void 0 ? void 0 : first.responseBodyKey) !== null && _g !== void 0 ? _g : first === null || first === void 0 ? void 0 : first.responseBodyUrl) !== null && _h !== void 0 ? _h : first === null || first === void 0 ? void 0 : first.bodyKey) !== null && _j !== void 0 ? _j : null;
+                                if (!bodyKey) {
+                                    logger.warn("No responseBodyKey in metadata — cannot load buffer.");
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                    return;
+                                }
+                                logger.debug("Found responseBodyKey:", bodyKey);
+                                // New WebGL format stores asset bytes in *another* store
+                                // Guess the store name:
+                                const bodyStoreName = "RequestStore"; // Unity still uses this internally sometimes
+                                if (!db.objectStoreNames.contains(bodyStoreName)) {
+                                    logger.warn(`Missing body store '${bodyStoreName}'. Falling back.`);
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                    return;
+                                }
+                                // Fetch buffer
+                                const bodyTx = db.transaction([bodyStoreName], "readonly");
+                                const bodyStore = bodyTx.objectStore(bodyStoreName);
+                                const bodyReq = bodyStore.get(bodyKey);
+                                bodyReq.onerror = () => __awaiter(this, void 0, void 0, function* () {
+                                    logger.error("Failed to read response body:", bodyReq.error);
+                                    db.close();
+                                    resolve(yield fallbackInterceptFetch());
+                                });
+                                bodyReq.onsuccess = () => __awaiter(this, void 0, void 0, function* () {
+                                    var _k, _l, _m, _o;
+                                    const bodyRecord = bodyReq.result;
+                                    logger.debug("Body record:", bodyRecord);
+                                    const buffer = (_m = (_l = (_k = bodyRecord === null || bodyRecord === void 0 ? void 0 : bodyRecord.response) === null || _k === void 0 ? void 0 : _k.parsedBody) === null || _l === void 0 ? void 0 : _l.buffer) !== null && _m !== void 0 ? _m : (_o = bodyRecord === null || bodyRecord === void 0 ? void 0 : bodyRecord.response) === null || _o === void 0 ? void 0 : _o.buffer;
+                                    if (!buffer) {
+                                        logger.warn("Response body found but missing buffer.");
+                                        db.close();
+                                        resolve(yield fallbackInterceptFetch());
+                                        return;
+                                    }
+                                    try {
+                                        const parsed = parseWebData(buffer);
+                                        db.close();
+                                        resolve(parsed);
+                                    }
+                                    catch (err) {
+                                        logger.error("Parsing response body failed:", err);
+                                        db.close();
+                                        resolve(yield fallbackInterceptFetch());
+                                    }
+                                });
+                            });
+                        }
+                        catch (err) {
+                            logger.error("Unexpected error reading RequestMetaDataStore:", err);
+                            db.close();
+                            resolve(yield fallbackInterceptFetch());
+                        }
+                        return;
                     }
                 });
             });
@@ -6724,7 +6810,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("06a31d683c9fdbf7bc15")
+/******/ 		__webpack_require__.h = () => ("d876c1f22665e855eea4")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
