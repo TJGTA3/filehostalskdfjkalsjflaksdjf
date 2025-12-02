@@ -5156,86 +5156,102 @@ class WailParser extends BufferReader {
   _parseFunctionSection() {
     this.commitBytes();
 
+    // Cache references for faster access
     const newEntries = this._sectionOptions[SECTION_FUNCTION].newEntries;
-    const existingEntries =
-      this._sectionOptions[SECTION_FUNCTION].existingEntries;
-
+    const existingEntries = this._sectionOptions[SECTION_FUNCTION].existingEntries;
+    
     const oldPayloadLen = this.readVarUint32();
-
-    const start = this.inPos;
+    
+    // Read old count with single position tracking
+    const countStart = this.inPos;
     const oldCount = this.readVarUint32();
-    const end = this.inPos;
-    const oldCountLength = end - start;
-
+    const oldCountLength = this.inPos - countStart;
+    
     const oldPayload = this.readBytes(oldPayloadLen - oldCountLength);
-
     const reader = new BufferReader(oldPayload);
 
+    // Optimize Unity runtime check
     let populateThisTimeOnly = false;
-    if (
-      !window.UnityWebModkit.Runtime ||
-      !window.UnityWebModkit.Runtime.internalWasmFunctions
-    ) {
-      populateThisTimeOnly = true;
-      window.UnityWebModkit.Runtime.internalWasmFunctions = [];
+    const unityRuntime = window.UnityWebModkit?.Runtime;
+    if (unityRuntime) {
+      if (!unityRuntime.internalWasmFunctions) {
+        populateThisTimeOnly = true;
+        unityRuntime.internalWasmFunctions = [];
+      }
+    }
+    
+    const internalWasmFunctions = unityRuntime?.internalWasmFunctions;
+
+    // Create lookup map for existing entries to avoid O(n^2) search
+    const existingEntriesMap = new Map();
+    if (existingEntries.length > 0) {
+      for (let i = 0; i < existingEntries.length; i++) {
+        const entry = existingEntries[i];
+        existingEntriesMap.set(entry.index, entry);
+      }
     }
 
+    // Pre-allocate array if populating (better for V8 optimization)
+    let wasmFunctionsArray = null;
+    if (populateThisTimeOnly && internalWasmFunctions) {
+      wasmFunctionsArray = internalWasmFunctions;
+    }
+
+    // Process existing functions
     for (let funcIndex = 0; funcIndex < oldCount; funcIndex++) {
       reader.commitBytes();
-
+      
+      // Read current function type
       let funcType = reader.readVarUint32();
-
-      for (let i = 0; i < existingEntries.length; i++) {
-        const thisEntry = existingEntries[i];
-
-        const thisIndex = thisEntry.index;
-
-        if (funcIndex == thisIndex) {
-          funcType = thisEntry.type;
-        }
+      
+      // Check if we need to modify this function
+      const existingEntry = existingEntriesMap.get(funcIndex);
+      if (existingEntry) {
+        funcType = existingEntry.type;
       }
-
+      
+      // Write back the (possibly modified) function type
       reader.copyBuffer(VarUint32ToArray(funcType));
-
-      if (!populateThisTimeOnly) continue;
-
-      window.UnityWebModkit.Runtime.internalWasmFunctions.push({
-        funcType,
-      });
+      
+      // Only populate if needed
+      if (wasmFunctionsArray) {
+        wasmFunctionsArray.push({ funcType });
+      }
     }
 
+    // Process new entries
     let newCount = oldCount;
-
+    const importFuncCount = this._importFuncCount;
+    
     for (let i = 0; i < newEntries.length; i++, newCount++) {
-      let optionsEntry = newEntries[i];
-
-      let type;
-
-      if (optionsEntry.type instanceof TypedWailVariable) {
-        type = optionsEntry.type.value;
-      } else if (optionsEntry.type instanceof WailVariable) {
+      const optionsEntry = newEntries[i];
+      
+      // Determine type with minimal branching
+      let typeBytes;
+      const typeField = optionsEntry.type;
+      
+      if (typeField instanceof TypedWailVariable) {
+        typeBytes = typeField.value;
+      } else if (typeField instanceof WailVariable) {
         throw new Error("Untyped WailVariable in _parseFunctionSection()");
       } else {
-        type = VarUint32ToArray(optionsEntry.type);
+        typeBytes = VarUint32ToArray(typeField);
       }
-
-      reader.copyBuffer(type);
-
-      if (optionsEntry.variable instanceof WailVariable) {
-        const functionIndex = newCount + this._importFuncCount;
-
-        optionsEntry.variable.value =
-          this._getAdjustedFunctionIndex(functionIndex);
+      
+      reader.copyBuffer(typeBytes);
+      
+      // Set variable value if needed
+      const variable = optionsEntry.variable;
+      if (variable instanceof WailVariable) {
+        const functionIndex = newCount + importFuncCount;
+        variable.value = this._getAdjustedFunctionIndex(functionIndex);
       }
     }
 
+    // Write final output
     const newCountArray = VarUint32ToArray(newCount);
-
     const newPayload = reader.write();
-
-    const newPayloadLen = VarUint32ToArray(
-      newCountArray.length + newPayload.length,
-    );
+    const newPayloadLen = VarUint32ToArray(newCountArray.length + newPayload.length);
 
     this.copyBuffer(newPayloadLen);
     this.copyBuffer(newCountArray);
@@ -6709,7 +6725,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("218d6ceb01acb11616c4")
+/******/ 		__webpack_require__.h = () => ("4b31660752c52d027282")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
