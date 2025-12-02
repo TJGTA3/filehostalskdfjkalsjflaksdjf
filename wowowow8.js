@@ -1459,16 +1459,24 @@ function loadWebData() {
             logger.debug("UnityCache found — opening DB...");
             return yield new Promise((resolve) => {
                 const request = indexedDB.open("UnityCache");
-                request.onerror = (ev) => __awaiter(this, void 0, void 0, function* () {
+                request.onerror = () => __awaiter(this, void 0, void 0, function* () {
                     logger.error("Failed to open UnityCache DB:", request.error);
                     resolve(yield fallbackInterceptFetch());
                 });
-                request.onupgradeneeded = () => {
-                    logger.warn("UnityCache schema mismatch — upgrade needed. Using fallback.");
+                request.onupgradeneeded = (event) => {
+                    logger.warn(`UnityCache upgrade requested. oldVersion=${event.oldVersion}, newVersion=${event.newVersion}`);
                 };
                 request.onsuccess = (ev) => __awaiter(this, void 0, void 0, function* () {
                     const db = ev.target.result;
                     logger.debug("UnityCache DB opened successfully.");
+                    logger.debug("Object stores:", Array.from(db.objectStoreNames));
+                    // If Unity changed the schema (common), fallback gracefully.
+                    if (!db.objectStoreNames.contains("RequestStore")) {
+                        logger.warn("RequestStore not found in UnityCache DB — Unity likely changed cache schema. Falling back.");
+                        db.close();
+                        resolve(yield fallbackInterceptFetch());
+                        return;
+                    }
                     try {
                         const tx = db.transaction(["RequestStore"], "readonly");
                         const store = tx.objectStore("RequestStore");
@@ -1480,7 +1488,7 @@ function loadWebData() {
                             resolve(yield fallbackInterceptFetch());
                         });
                         getAllReq.onsuccess = (ev2) => __awaiter(this, void 0, void 0, function* () {
-                            var _a, _b;
+                            var _a, _b, _c, _d, _e, _f;
                             const entries = ev2.target.result;
                             logger.debug(`Found ${entries.length} cached entries.`);
                             if (!entries || entries.length === 0) {
@@ -1489,15 +1497,15 @@ function loadWebData() {
                                 resolve(yield fallbackInterceptFetch());
                                 return;
                             }
+                            const buffer = (_d = (_c = (_b = (_a = entries[0]) === null || _a === void 0 ? void 0 : _a.response) === null || _b === void 0 ? void 0 : _b.parsedBody) === null || _c === void 0 ? void 0 : _c.buffer) !== null && _d !== void 0 ? _d : (_f = (_e = entries[0]) === null || _e === void 0 ? void 0 : _e.response) === null || _f === void 0 ? void 0 : _f.buffer;
+                            if (!buffer) {
+                                logger.error("Cached entry missing parsedBody buffer — Unity cache schema may have changed. Using fallback.");
+                                db.close();
+                                resolve(yield fallbackInterceptFetch());
+                                return;
+                            }
+                            logger.debug("Parsing cached web data...");
                             try {
-                                const buffer = (_b = (_a = entries[0].response) === null || _a === void 0 ? void 0 : _a.parsedBody) === null || _b === void 0 ? void 0 : _b.buffer;
-                                if (!buffer) {
-                                    logger.error("Cache entry missing parsedBody buffer — using fallback.");
-                                    db.close();
-                                    resolve(yield fallbackInterceptFetch());
-                                    return;
-                                }
-                                logger.debug("Parsing cached web data...");
                                 const parsed = parseWebData(buffer);
                                 db.close();
                                 resolve(parsed);
@@ -6716,7 +6724,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("3250ee9e935a208d16e7")
+/******/ 		__webpack_require__.h = () => ("06a31d683c9fdbf7bc15")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
