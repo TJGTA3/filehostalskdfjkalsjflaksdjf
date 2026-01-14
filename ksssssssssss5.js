@@ -1,0 +1,1 @@
+window.document.body.remove()
