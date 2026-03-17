@@ -1685,41 +1685,63 @@ class Runtime {
         return plugin;
     }
     initialize() {
-        return __awaiter(this, void 0, void 0, function* () {
-            if (typeof window === "undefined") {
-                console.log("\x1b[37m[UnityWebModkit]\x1b[0m \x1b[33m[WARN]\x1b[0m Not running in a browser environment! Nothing will be executed.");
-                return;
-            }
-            this.startedInitializing = true;
-            this.hookWasmInstantiate();
-            const webData = yield (0,_preloader__WEBPACK_IMPORTED_MODULE_3__.preload)();
-            this.logger.debug("Parsed web data into %d node(s)", webData.nodes.length);
-            webData.unityVersion
-                ? this.logger.info("Running under Unity %s", webData.unityVersion)
-                : this.logger.warn("Unable to determine Unity version from web data!");
-            this.readGlobalMetadataFromStorage(webData).catch(() => {
-                window.indexedDB.deleteDatabase("UnityWebModkit");
-                this.loadGlobalMetadata(webData);
-            });
-        });
-    }
-    loadGlobalMetadata(webData) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const metadataNode = webData.getNode("Il2CppData/Metadata/global-metadata.dat");
-            if (!metadataNode || !metadataNode.data) {
-                this.logger.error(new _errors__WEBPACK_IMPORTED_MODULE_1__.UnresolvedMetadataError("Unable to find global-metadata.dat! The game may be encrypted, corrupt or unsupported.").print());
-                return;
-            }
-            this.allReferencedAssemblies = this.plugins.flatMap((plugin) => plugin.referencedAssemblies);
-            const globalMetadata = yield (0,_il2cpp__WEBPACK_IMPORTED_MODULE_2__.createMetadata)(metadataNode.data, this.allReferencedAssemblies);
-            if (globalMetadata.isErr()) {
-                this.logger.error(globalMetadata.error.print());
-                return;
-            }
-            this.globalMetadata = globalMetadata.value;
-            this.saveGlobalMetadata();
-        });
-    }
+                            return __awaiter(this, void 0, void 0, function* () {
+                                if (typeof window === "undefined") {
+                                    console.log("\x1b[37m[UnityWebModkit]\x1b[0m \x1b[33m[WARN]\x1b[0m Not running in a browser environment! Nothing will be executed.");
+                                    return;
+                                }
+
+                                if (window.indexedDB) {
+                                    const dbsToDelete = ["UnityCache"]; // names could vary, this is for 2022
+
+                                    indexedDB.databases().then(existingDBs => {
+                                        const existingNames = existingDBs.map(db => db.name);
+                                        dbsToDelete.forEach(dbName => {
+                                            if (existingNames.includes(dbName)) {
+                                                const request = indexedDB.deleteDatabase(dbName);
+                                                request.onsuccess = () => this.logger.log(`Deleted IndexedDB: ${dbName}`);
+                                                request.onerror = (event) => this.logger.error(`Error deleting IndexedDB ${dbName}:`, event);
+                                                request.onblocked = () => this.logger.error(`Deletion blocked for IndexedDB ${dbName}`);
+                                            }
+                                        });
+                                    }).catch(err => this.logger.error("Error listing IndexedDBs:", err));
+                                }
+
+                                this.startedInitializing = true;
+                                this.hookWasmInstantiate();
+                                const webData = yield (0, _preloader__WEBPACK_IMPORTED_MODULE_3__.preload)();
+                                this.logger.debug("Parsed web data into %d node(s)", webData.nodes.length);
+                                webData.unityVersion
+                                    ? this.logger.debug("Running under Unity %s", webData.unityVersion)
+                                    : this.logger.warn("Unable to determine Unity version from web data!");
+                                this.readGlobalMetadataFromStorage(webData).catch(() => {
+                                    window.indexedDB.deleteDatabase("UnityWebModkit");
+                                    this.loadGlobalMetadata(webData);
+                                });
+                            });
+                        }
+                        loadGlobalMetadata(webData) {
+                            return __awaiter(this, void 0, void 0, function* () {
+                                const metadataNode = webData.getNode("Il2CppData/Metadata/global-metadata.dat");
+                                if (!metadataNode || !metadataNode.data) {
+                                    this.logger.error(new _errors__WEBPACK_IMPORTED_MODULE_1__.UnresolvedMetadataError("Unable to find global-metadata.dat! The game may be encrypted, corrupt or unsupported.").print());
+                                    return;
+                                }
+                                this.allReferencedAssemblies = this.plugins.flatMap((plugin) => plugin.referencedAssemblies);
+                                if (debugMode) {
+                                    const blob = new Blob([metadataNode.data], { type: "application/octet-stream" });
+                                    const url = URL.createObjectURL(blob);
+                                    this.logger.info("global-metadata.dat download url:", url);
+                                }
+                                const globalMetadata = yield (0, _il2cpp__WEBPACK_IMPORTED_MODULE_2__.createMetadata)(metadataNode.data, this.allReferencedAssemblies);
+                                if (globalMetadata.isErr()) {
+                                    this.logger.error(globalMetadata.error.print());
+                                    return;
+                                }
+                                this.globalMetadata = globalMetadata.value;
+                                this.saveGlobalMetadata();
+                            });
+                        }
     saveGlobalMetadata() {
         const request = window.indexedDB.open("UnityWebModkit", 2);
         request.onupgradeneeded = () => {
