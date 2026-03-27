@@ -1559,16 +1559,14 @@ function preload() {
 }
 function preloadInternal() {
     return __awaiter(this, void 0, void 0, function* () {
+        // Install the fetch hook FIRST before any async work, so we never miss
+        // a Unity request that fires during or before cache clearing.
+        logger.debug("[Preloader] Installing fetch hook early...");
+        const webDataPromise = fallbackInterceptFetch();
         logger.debug("[Preloader] Clearing Unity caches...");
         yield clearUnityCache();
-        logger.debug("[Preloader] Loading Unity web data using fetch...");
-        return yield loadWebData();
-    });
-}
-function loadWebData() {
-    return __awaiter(this, void 0, void 0, function* () {
-        logger.debug("[Preloader] Skipping IndexedDB � always using fetch method.");
-        return yield fallbackInterceptFetch();
+        logger.debug("[Preloader] Waiting for Unity web data...");
+        return yield webDataPromise;
     });
 }
 // ---------------------------------------------------------------------------
@@ -6924,7 +6922,7 @@ class WailParser extends BufferReader {
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	(() => {
-/******/ 		__webpack_require__.h = () => ("6200cf2c4e371f3fb775")
+/******/ 		__webpack_require__.h = () => ("9d69bd5e69d212be6030")
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
